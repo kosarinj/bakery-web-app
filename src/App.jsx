@@ -4,6 +4,7 @@ import Login from './components/Login'
 import Layout from './components/Layout'
 import OrdersGrid from './components/orders/OrdersGrid'
 import InventoryGrid from './components/inventory/InventoryGrid'
+import ProductsList from './components/products/ProductsList'
 import RecipeGrid from './components/recipes/RecipeGrid'
 import AccountsList from './components/accounts/AccountsList'
 import PriceGrid from './components/pricing/PriceGrid'
@@ -39,6 +40,7 @@ export default function App() {
           <Route index element={<Navigate to="/orders" replace />} />
           <Route path="orders" element={<OrdersGrid />} />
           <Route path="inventory" element={<InventoryGrid />} />
+          <Route path="products" element={<ProductsList />} />
           <Route path="recipes" element={<RecipeGrid />} />
           <Route path="accounts" element={<AccountsList />} />
           <Route path="pricing" element={<PriceGrid />} />

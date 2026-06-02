@@ -139,5 +139,5 @@ CREATE TABLE IF NOT EXISTS return_items (
 -- Seed a default admin user (password: admin — change immediately)
 -- bcrypt hash of 'admin'
 INSERT INTO users (username, password_hash, role)
-VALUES ('admin', '$2b$10$92IXUNpkjO0rOQ5byMi.Ye4oKoEa3Ro9llC/.og/at2.uheWG/igi', 'admin')
+VALUES ('admin', '$2a$10$vtOaNw1pAbFHKsKM5jP1cuDUDeUucg3PTPg95StZX1XgcQdyTWJWK', 'admin')
 ON CONFLICT DO NOTHING;

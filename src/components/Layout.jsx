@@ -4,6 +4,7 @@ import { NavLink, Outlet } from 'react-router-dom'
 const NAV_ITEMS = [
   { to: '/orders',    icon: '📋', label: 'Orders' },
   { to: '/inventory', icon: '📦', label: 'Inventory' },
+  { to: '/products',  icon: '🥐', label: 'Products' },
   { to: '/recipes',   icon: '📖', label: 'Recipes' },
   { to: '/accounts',  icon: '🏪', label: 'Accounts' },
   { to: '/pricing',   icon: '💲', label: 'Pricing' },

@@ -75,7 +75,12 @@ app.patch('/api/settings/:key', requireAuth, async (req, res) => {
 // ─── Products ──────────────────────────────────────────────────────────────
 
 app.get('/api/products', requireAuth, async (req, res) => {
-  const { rows } = await query('SELECT * FROM products WHERE active=true ORDER BY prod_name')
+  const all = req.query.all === '1'
+  const { rows } = await query(
+    all
+      ? 'SELECT * FROM products ORDER BY prod_group, prod_name'
+      : 'SELECT * FROM products WHERE active=true ORDER BY prod_group, prod_name'
+  )
   res.json(rows)
 })
 
