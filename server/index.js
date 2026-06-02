@@ -3,18 +3,28 @@ import express from 'express'
 import session from 'express-session'
 import cors from 'cors'
 import bcrypt from 'bcryptjs'
+import { dirname, join } from 'path'
+import { fileURLToPath } from 'url'
 import { query } from './db.js'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const isProd = process.env.NODE_ENV === 'production'
 
 const app = express()
 const PORT = process.env.PORT || 3002
 
-app.use(cors({ origin: 'http://localhost:5174', credentials: true }))
+app.set('trust proxy', 1)  // required for secure cookies behind Railway's proxy
+app.use(cors({ origin: true, credentials: true }))
 app.use(express.json())
 app.use(session({
   secret: process.env.SESSION_SECRET || 'bakery-secret-change-me',
   resave: false,
   saveUninitialized: false,
-  cookie: { secure: false, maxAge: 8 * 60 * 60 * 1000 }
+  cookie: {
+    secure: isProd,
+    sameSite: isProd ? 'none' : 'lax',
+    maxAge: 8 * 60 * 60 * 1000
+  }
 }))
 
 const requireAuth = (req, res, next) => {
@@ -467,6 +477,11 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
   `, [dateVal])
   res.json(rows)
 })
+
+// ─── Frontend (production) ─────────────────────────────────────────────────
+
+app.use(express.static(join(__dirname, '../dist')))
+app.get('*', (_req, res) => res.sendFile(join(__dirname, '../dist/index.html')))
 
 // ─── Start ─────────────────────────────────────────────────────────────────
 
