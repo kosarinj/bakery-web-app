@@ -5,7 +5,7 @@ import cors from 'cors'
 import bcrypt from 'bcryptjs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
-import { query } from './db.js'
+import pool, { query } from './db.js'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isProd = process.env.NODE_ENV === 'production'
@@ -505,6 +505,165 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
     ORDER BY p.prod_group, p.prod_name
   `, [dateVal])
   res.json(rows)
+})
+
+// ─── Export ────────────────────────────────────────────────────────────────
+
+function toCSV(rows, cols) {
+  const esc = v => {
+    if (v === null || v === undefined) return ''
+    const s = String(v)
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? `"${s.replace(/"/g, '""')}"` : s
+  }
+  return [cols.join(','), ...rows.map(r => cols.map(c => esc(r[c])).join(','))].join('\n')
+}
+
+const EXPORTS = {
+  products:       ['SELECT prod_name,prod_type,prod_group,barcode,multiplier,divisor,batch,active,notes FROM products ORDER BY prod_group,prod_name',
+                   ['prod_name','prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes']],
+  accounts:       ['SELECT name,route,sequence,category,acctgrp,marketfee,prefix,postord,active,notes FROM accounts ORDER BY sequence,name',
+                   ['name','route','sequence','category','acctgrp','marketfee','prefix','postord','active','notes']],
+  prices:         ['SELECT prod_name,category,whole_price,ret_price FROM prices ORDER BY prod_name,category',
+                   ['prod_name','category','whole_price','ret_price']],
+  account_prices: ['SELECT account,prod_name,whole_price,ret_price FROM account_prices ORDER BY account,prod_name',
+                   ['account','prod_name','whole_price','ret_price']],
+  ingredients:    ['SELECT name,unit,notes FROM ingredients ORDER BY name',
+                   ['name','unit','notes']],
+  recipes:        ['SELECT product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rectext FROM recipes ORDER BY product,sequence,ingredient',
+                   ['product','ingredient','sequence','qty','teaspoons','tablespoons','cups','pounds','rectext']],
+  inventory:      ['SELECT prod_name,units,sod_inv,location FROM inventory ORDER BY prod_name',
+                   ['prod_name','units','sod_inv','location']],
+}
+
+app.get('/api/export/:table', requireAuth, async (req, res) => {
+  const cfg = EXPORTS[req.params.table]
+  if (!cfg) return res.status(404).json({ error: 'Unknown table' })
+  const { rows } = await query(cfg[0])
+  res.setHeader('Content-Type', 'text/csv')
+  res.setHeader('Content-Disposition', `attachment; filename="${req.params.table}.csv"`)
+  res.send(toCSV(rows, cfg[1]))
+})
+
+// ─── Import ────────────────────────────────────────────────────────────────
+
+// Helpers to pull values from a normalized (lowercase keys) row
+const col  = (r, k, d = null) => { const v = r[k] ?? d; return v === '' ? d : v }
+const num  = (r, k, d = 0)    => parseFloat(col(r, k, d)) || d
+const bool = (r, k, d = false) => {
+  const v = col(r, k)
+  if (v === null) return d
+  return ['true','1','yes'].includes(String(v).toLowerCase())
+}
+
+app.post('/api/import/:table', requireAuth, async (req, res) => {
+  const { rows } = req.body
+  if (!Array.isArray(rows) || !rows.length) return res.json({ imported: 0, errors: [] })
+
+  const norm = rows.map(r =>
+    Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
+  )
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    let count = 0
+    const errors = []
+
+    for (const row of norm) {
+      try {
+        switch (req.params.table) {
+          case 'products':
+            await client.query(
+              `INSERT INTO products(prod_name,prod_type,prod_group,barcode,multiplier,divisor,batch,active,notes)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+               ON CONFLICT(prod_name) DO UPDATE SET
+                 prod_type=EXCLUDED.prod_type,prod_group=EXCLUDED.prod_group,barcode=EXCLUDED.barcode,
+                 multiplier=EXCLUDED.multiplier,divisor=EXCLUDED.divisor,batch=EXCLUDED.batch,
+                 active=EXCLUDED.active,notes=EXCLUDED.notes`,
+              [col(row,'prod_name'), col(row,'prod_type'), col(row,'prod_group'), col(row,'barcode'),
+               num(row,'multiplier',1), num(row,'divisor',1), bool(row,'batch'), bool(row,'active',true), col(row,'notes')]
+            )
+            await client.query(
+              `INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`,
+              [col(row,'prod_name')]
+            )
+            break
+          case 'accounts':
+            await client.query(
+              `INSERT INTO accounts(name,route,sequence,category,acctgrp,marketfee,prefix,postord,active,notes)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+               ON CONFLICT(name) DO UPDATE SET
+                 route=EXCLUDED.route,sequence=EXCLUDED.sequence,category=EXCLUDED.category,
+                 acctgrp=EXCLUDED.acctgrp,marketfee=EXCLUDED.marketfee,prefix=EXCLUDED.prefix,
+                 postord=EXCLUDED.postord,active=EXCLUDED.active,notes=EXCLUDED.notes`,
+              [col(row,'name'), col(row,'route'), num(row,'sequence'), col(row,'category','wholesale'),
+               col(row,'acctgrp'), num(row,'marketfee'), col(row,'prefix'), bool(row,'postord'), bool(row,'active',true), col(row,'notes')]
+            )
+            break
+          case 'prices':
+            await client.query(
+              `INSERT INTO prices(prod_name,category,whole_price,ret_price,last_update)
+               VALUES($1,$2,$3,$4,NOW())
+               ON CONFLICT(prod_name,category) DO UPDATE SET
+                 whole_price=EXCLUDED.whole_price,ret_price=EXCLUDED.ret_price,last_update=NOW()`,
+              [col(row,'prod_name'), col(row,'category','wholesale'), num(row,'whole_price'), num(row,'ret_price')]
+            )
+            break
+          case 'account_prices':
+            await client.query(
+              `INSERT INTO account_prices(account,prod_name,whole_price,ret_price,last_update)
+               VALUES($1,$2,$3,$4,NOW())
+               ON CONFLICT(account,prod_name) DO UPDATE SET
+                 whole_price=EXCLUDED.whole_price,ret_price=EXCLUDED.ret_price,last_update=NOW()`,
+              [col(row,'account'), col(row,'prod_name'), num(row,'whole_price'), num(row,'ret_price')]
+            )
+            break
+          case 'ingredients':
+            await client.query(
+              `INSERT INTO ingredients(name,unit,notes) VALUES($1,$2,$3)
+               ON CONFLICT(name) DO UPDATE SET unit=EXCLUDED.unit,notes=EXCLUDED.notes`,
+              [col(row,'name'), col(row,'unit'), col(row,'notes')]
+            )
+            break
+          case 'recipes':
+            await client.query(
+              `INSERT INTO recipes(product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rectext,last_update)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
+               ON CONFLICT(product,ingredient) DO UPDATE SET
+                 sequence=EXCLUDED.sequence,qty=EXCLUDED.qty,teaspoons=EXCLUDED.teaspoons,
+                 tablespoons=EXCLUDED.tablespoons,cups=EXCLUDED.cups,pounds=EXCLUDED.pounds,
+                 rectext=EXCLUDED.rectext,last_update=NOW()`,
+              [col(row,'product'), col(row,'ingredient'), num(row,'sequence'), num(row,'qty'),
+               num(row,'teaspoons'), num(row,'tablespoons'), num(row,'cups'), num(row,'pounds'), col(row,'rectext')]
+            )
+            break
+          case 'inventory':
+            await client.query(
+              `INSERT INTO inventory(prod_name,units,sod_inv,location,lst_updt)
+               VALUES($1,$2,$3,$4,NOW())
+               ON CONFLICT(prod_name) DO UPDATE SET
+                 units=EXCLUDED.units,sod_inv=EXCLUDED.sod_inv,location=EXCLUDED.location,lst_updt=NOW()`,
+              [col(row,'prod_name'), num(row,'units'), num(row,'sod_inv'), col(row,'location')]
+            )
+            break
+          default:
+            throw new Error(`Unknown table: ${req.params.table}`)
+        }
+        count++
+      } catch (e) {
+        errors.push({ error: e.message, row })
+      }
+    }
+
+    await client.query('COMMIT')
+    res.json({ imported: count, errors })
+  } catch (e) {
+    await client.query('ROLLBACK')
+    res.status(400).json({ error: e.message })
+  } finally {
+    client.release()
+  }
 })
 
 // ─── Frontend (production) ─────────────────────────────────────────────────

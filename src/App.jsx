@@ -9,6 +9,7 @@ import RecipeGrid from './components/recipes/RecipeGrid'
 import AccountsList from './components/accounts/AccountsList'
 import PriceGrid from './components/pricing/PriceGrid'
 import BakeSchedule from './components/baking/BakeSchedule'
+import ImportExport from './components/import-export/ImportExport'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -45,6 +46,7 @@ export default function App() {
           <Route path="accounts" element={<AccountsList />} />
           <Route path="pricing" element={<PriceGrid />} />
           <Route path="baking" element={<BakeSchedule />} />
+          <Route path="import" element={<ImportExport />} />
         </Route>
       </Routes>
     </BrowserRouter>
