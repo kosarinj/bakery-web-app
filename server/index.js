@@ -299,6 +299,30 @@ app.delete('/api/orders/:id', requireAuth, async (req, res) => {
   res.json({ success: true })
 })
 
+// Copy orders from one date to another (skips account+product pairs already entered on to_date)
+app.post('/api/orders/copy', requireAuth, async (req, res) => {
+  const { from_date, to_date } = req.body
+  if (!from_date || !to_date) return res.status(400).json({ error: 'from_date and to_date required' })
+  try {
+    const { rows } = await query(`
+      INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, last_update)
+      SELECT f.prod_name, f.account, f.units, f.wprice, f.rprice, $2::date, NOW()
+      FROM daily_orders f
+      WHERE f.ordr_dt = $1
+        AND NOT EXISTS (
+          SELECT 1 FROM daily_orders e
+          WHERE e.prod_name = f.prod_name
+            AND e.account = f.account
+            AND e.ordr_dt = $2::date
+        )
+      RETURNING *
+    `, [from_date, to_date])
+    res.json({ copied: rows.length, rows })
+  } catch (e) {
+    res.status(400).json({ error: e.message })
+  }
+})
+
 // Orders summary: units per product for a given date (for bake list / have-need)
 app.get('/api/orders/summary', requireAuth, async (req, res) => {
   const { date } = req.query

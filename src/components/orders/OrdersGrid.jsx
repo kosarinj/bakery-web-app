@@ -1,6 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
 import EditableCell from '../shared/EditableCell'
 
+function prevDay(dateStr) {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() - 1)
+  return d.toISOString().slice(0, 10)
+}
+
 export default function OrdersGrid() {
   const [date, setDate] = useState('')
   const [accounts, setAccounts] = useState([])
@@ -8,13 +14,24 @@ export default function OrdersGrid() {
   const [orderMap, setOrderMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [copyFrom, setCopyFrom] = useState('')
+  const [copying, setCopying] = useState(false)
+  const [copyMsg, setCopyMsg] = useState('')
   const orderMapRef = useRef({})
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
-      .then(s => setDate(s.baking_date || new Date().toISOString().slice(0, 10)))
-      .catch(() => setDate(new Date().toISOString().slice(0, 10)))
+      .then(s => {
+        const d = s.baking_date || new Date().toISOString().slice(0, 10)
+        setDate(d)
+        setCopyFrom(prevDay(d))
+      })
+      .catch(() => {
+        const d = new Date().toISOString().slice(0, 10)
+        setDate(d)
+        setCopyFrom(prevDay(d))
+      })
   }, [])
 
   useEffect(() => {
@@ -71,6 +88,37 @@ export default function OrdersGrid() {
     }
   }, [])
 
+  async function copyOrders() {
+    if (!copyFrom || !date) return
+    setCopying(true)
+    setCopyMsg('')
+    setError('')
+    try {
+      const r = await fetch('/api/orders/copy', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ from_date: copyFrom, to_date: date })
+      })
+      const data = await r.json()
+      if (!r.ok) throw new Error(data.error)
+
+      // Merge copied rows into orderMap
+      const updated = { ...orderMapRef.current }
+      data.rows.forEach(o => {
+        updated[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
+      })
+      orderMapRef.current = updated
+      setOrderMap(updated)
+      setCopyMsg(`Copied ${data.copied} order${data.copied !== 1 ? 's' : ''} from ${copyFrom}`)
+      setTimeout(() => setCopyMsg(''), 4000)
+    } catch (e) {
+      setError(`Copy failed: ${e.message}`)
+    } finally {
+      setCopying(false)
+    }
+  }
+
   const colTotal = (prod_name) =>
     accounts.reduce((sum, a) => sum + (orderMapRef.current[`${a.name}|${prod_name}`]?.units || 0), 0)
 
@@ -85,25 +133,37 @@ export default function OrdersGrid() {
       <div className="page-toolbar">
         <label>
           Date:
-          <input
-            type="date"
-            value={date}
-            onChange={e => setDate(e.target.value)}
-          />
+          <input type="date" value={date} onChange={e => setDate(e.target.value)} />
         </label>
         <span className="toolbar-info">
           {accounts.length} accounts &middot; {products.length} products
         </span>
+        <div className="toolbar-spacer" />
+        <label>
+          Copy from:
+          <input type="date" value={copyFrom} onChange={e => setCopyFrom(e.target.value)} />
+        </label>
+        <button
+          className="btn btn-secondary btn-sm"
+          onClick={copyOrders}
+          disabled={copying || !copyFrom || copyFrom === date}
+          title="Copy orders from the selected date into the current date (skips cells already filled)"
+        >
+          {copying ? 'Copying…' : '⬇ Repeat Orders'}
+        </button>
+        {copyMsg && (
+          <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>
+        )}
       </div>
 
       {error && <div className="error-message">{error}</div>}
 
       {accounts.length === 0 && (
-        <div className="empty-state">No accounts found. Add accounts first.</div>
+        <div className="empty-state">No accounts found. Add accounts in the Accounts tab first.</div>
       )}
 
       {products.length === 0 && (
-        <div className="empty-state">No products found. Add products first.</div>
+        <div className="empty-state">No products found. Add products in the Products tab first.</div>
       )}
 
       {accounts.length > 0 && products.length > 0 && (
@@ -152,9 +212,7 @@ export default function OrdersGrid() {
                 <td className="sticky-col">Total</td>
                 {products.map(p => {
                   const t = colTotal(p.prod_name)
-                  return (
-                    <td key={p.prod_name} className="total-cell">{t || ''}</td>
-                  )
+                  return <td key={p.prod_name} className="total-cell">{t || ''}</td>
                 })}
                 <td className="total-cell">{grandTotal || ''}</td>
               </tr>
