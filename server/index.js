@@ -138,7 +138,12 @@ app.post('/api/accounts', requireAuth, async (req, res) => {
 })
 
 app.patch('/api/accounts/:name', requireAuth, async (req, res) => {
-  const fields = ['route','sequence','category','acctgrp','balance','marketfee','prefix','postord','active','notes']
+  const fields = [
+    'route','sequence','category','acctgrp','balance','marketfee','prefix','postord','active','notes',
+    'acct_id','subcategory','open_dt','manager','owner','address','city','state','phone','fax','email',
+    'del_inst','entire_inv','wrap_muffins','print_inv','next_del','gas','tolls',
+    'region','day_of_week','webname','sendweb','webstart','webend','adj_level'
+  ]
   const updates = []
   const vals = []
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
@@ -522,8 +527,17 @@ function toCSV(rows, cols) {
 const EXPORTS = {
   products:       ['SELECT prod_name,prod_type,prod_group,barcode,multiplier,divisor,batch,active,notes FROM products ORDER BY prod_group,prod_name',
                    ['prod_name','prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes']],
-  accounts:       ['SELECT name,route,sequence,category,acctgrp,marketfee,prefix,postord,active,notes FROM accounts ORDER BY sequence,name',
-                   ['name','route','sequence','category','acctgrp','marketfee','prefix','postord','active','notes']],
+  accounts:       [`SELECT name,acct_id,acctgrp,subcategory,category,route,sequence,region,day_of_week,
+                          manager,owner,address,city,state,phone,fax,email,
+                          del_inst,prefix,postord,entire_inv,wrap_muffins,print_inv,next_del,
+                          marketfee,gas,tolls,balance,webname,sendweb,webstart,webend,adj_level,
+                          open_dt,active,notes
+                   FROM accounts ORDER BY sequence,name`,
+                   ['name','acct_id','acctgrp','subcategory','category','route','sequence','region','day_of_week',
+                    'manager','owner','address','city','state','phone','fax','email',
+                    'del_inst','prefix','postord','entire_inv','wrap_muffins','print_inv','next_del',
+                    'marketfee','gas','tolls','balance','webname','sendweb','webstart','webend','adj_level',
+                    'open_dt','active','notes']],
   prices:         ['SELECT prod_name,category,whole_price,ret_price FROM prices ORDER BY prod_name,category',
                    ['prod_name','category','whole_price','ret_price']],
   account_prices: ['SELECT account,prod_name,whole_price,ret_price FROM account_prices ORDER BY account,prod_name',
@@ -554,6 +568,22 @@ const bool = (r, k, d = false) => {
   const v = col(r, k)
   if (v === null) return d
   return ['true','1','yes'].includes(String(v).toLowerCase())
+}
+
+// Parse Access date formats: DD-Mon-YY, DD-Mon-YYYY, or standard ISO
+const MON = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11}
+const parseAccessDate = v => {
+  if (!v || v === '00-Jan-00' || v === '00-Jan-1900') return null
+  const m = v.match(/^(\d{1,2})-([A-Za-z]{3})-(\d{2,4})$/)
+  if (m) {
+    const day = parseInt(m[1]), mon = MON[m[2].toLowerCase()]
+    let yr = parseInt(m[3])
+    if (yr < 100) yr += yr < 30 ? 2000 : 1900
+    if (mon === undefined) return null
+    return `${yr}-${String(mon+1).padStart(2,'0')}-${String(day).padStart(2,'0')}`
+  }
+  const d = new Date(v)
+  return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
 }
 
 app.post('/api/import/:table', requireAuth, async (req, res) => {
@@ -589,18 +619,52 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
               [col(row,'prod_name')]
             )
             break
-          case 'accounts':
+          case 'accounts': {
+            // 'account' col in Access = numeric ID; 'market_fee' = our marketfee
+            const mfee = num(row, 'marketfee') || num(row, 'market_fee')
+            const aid  = col(row, 'acct_id') ?? col(row, 'account')
             await client.query(
-              `INSERT INTO accounts(name,route,sequence,category,acctgrp,marketfee,prefix,postord,active,notes)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+              `INSERT INTO accounts(
+                 name,acct_id,acctgrp,subcategory,category,route,sequence,region,day_of_week,
+                 manager,owner,address,city,state,phone,fax,email,
+                 del_inst,prefix,postord,entire_inv,wrap_muffins,print_inv,next_del,
+                 marketfee,gas,tolls,balance,webname,sendweb,webstart,webend,adj_level,
+                 open_dt,active,notes)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,
+                      $18,$19,$20,$21,$22,$23,$24,$25,$26,$27,$28,$29,$30,$31,$32,$33,$34,$35,$36)
                ON CONFLICT(name) DO UPDATE SET
-                 route=EXCLUDED.route,sequence=EXCLUDED.sequence,category=EXCLUDED.category,
-                 acctgrp=EXCLUDED.acctgrp,marketfee=EXCLUDED.marketfee,prefix=EXCLUDED.prefix,
-                 postord=EXCLUDED.postord,active=EXCLUDED.active,notes=EXCLUDED.notes`,
-              [col(row,'name'), col(row,'route'), num(row,'sequence'), col(row,'category','wholesale'),
-               col(row,'acctgrp'), num(row,'marketfee'), col(row,'prefix'), bool(row,'postord'), bool(row,'active',true), col(row,'notes')]
+                 acct_id=EXCLUDED.acct_id,acctgrp=EXCLUDED.acctgrp,subcategory=EXCLUDED.subcategory,
+                 category=EXCLUDED.category,route=EXCLUDED.route,sequence=EXCLUDED.sequence,
+                 region=EXCLUDED.region,day_of_week=EXCLUDED.day_of_week,
+                 manager=EXCLUDED.manager,owner=EXCLUDED.owner,address=EXCLUDED.address,
+                 city=EXCLUDED.city,state=EXCLUDED.state,phone=EXCLUDED.phone,
+                 fax=EXCLUDED.fax,email=EXCLUDED.email,del_inst=EXCLUDED.del_inst,
+                 prefix=EXCLUDED.prefix,postord=EXCLUDED.postord,entire_inv=EXCLUDED.entire_inv,
+                 wrap_muffins=EXCLUDED.wrap_muffins,print_inv=EXCLUDED.print_inv,
+                 next_del=EXCLUDED.next_del,marketfee=EXCLUDED.marketfee,
+                 gas=EXCLUDED.gas,tolls=EXCLUDED.tolls,balance=EXCLUDED.balance,
+                 webname=EXCLUDED.webname,sendweb=EXCLUDED.sendweb,
+                 webstart=EXCLUDED.webstart,webend=EXCLUDED.webend,
+                 adj_level=EXCLUDED.adj_level,open_dt=EXCLUDED.open_dt,
+                 active=EXCLUDED.active,notes=EXCLUDED.notes`,
+              [
+                col(row,'name'), aid ? parseInt(aid) : null,
+                col(row,'acctgrp'), col(row,'subcategory'), col(row,'category','wholesale'),
+                col(row,'route'), num(row,'sequence'), col(row,'region'), col(row,'day_of_week'),
+                col(row,'manager'), col(row,'owner'), col(row,'address'),
+                col(row,'city'), col(row,'state'), col(row,'phone'), col(row,'fax'), col(row,'email'),
+                col(row,'del_inst'), col(row,'prefix'), bool(row,'postord'),
+                bool(row,'entire_inv'), bool(row,'wrap_muffins'), bool(row,'print_inv',true),
+                parseAccessDate(col(row,'next_del')),
+                mfee, num(row,'gas'), num(row,'tolls'), num(row,'balance'),
+                col(row,'webname'), bool(row,'sendweb'),
+                parseAccessDate(col(row,'webstart')), parseAccessDate(col(row,'webend')),
+                num(row,'adj_level'), parseAccessDate(col(row,'open_dt')),
+                bool(row,'active',true), col(row,'notes')
+              ]
             )
             break
+          }
           case 'prices':
             await client.query(
               `INSERT INTO prices(prod_name,category,whole_price,ret_price,last_update)
