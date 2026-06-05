@@ -208,13 +208,8 @@ export default function ImportExport() {
                               ✓ {res.imported} rows imported
                             </span>
                             {res.errors?.length > 0 && (
-                              <div style={{ color: 'var(--error)', fontSize: 11, marginTop: 3 }}>
-                                {res.errors.length} row{res.errors.length !== 1 ? 's' : ''} skipped
-                                <span
-                                  style={{ marginLeft: 6, cursor: 'pointer', textDecoration: 'underline' }}
-                                  onClick={() => console.table(res.errors)}
-                                  title="Open browser console to see details"
-                                > (details in console)</span>
+                              <div style={{ color: 'var(--error)', fontSize: 11, marginTop: 4, maxWidth: 300 }}>
+                                <strong>{res.errors.length} skipped</strong> — {res.errors[0]?.error}
                               </div>
                             )}
                           </div>
