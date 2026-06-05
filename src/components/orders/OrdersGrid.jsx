@@ -83,8 +83,8 @@ export default function OrdersGrid() {
   const [calOpen, setCalOpen] = useState(false)
   const [calMonth, setCalMonth] = useState('')
   const [activeDates, setActiveDates] = useState(new Set())
-  const [hideEmptyRows, setHideEmptyRows] = useState(false)
-  const [hideEmptyCols, setHideEmptyCols] = useState(false)
+  const [hideEmptyRows, setHideEmptyRows] = useState(true)
+  const [hideEmptyCols, setHideEmptyCols] = useState(true)
   const orderMapRef = useRef({})
 
   useEffect(() => {
