@@ -46,6 +46,13 @@ const TABLES = [
     desc: 'Current on-hand quantities',
     cols: 'prod_name, units, sod_inv, location',
   },
+  {
+    key: 'daily_orders',
+    label: 'Daily Orders',
+    desc: 'Historical order data',
+    cols: 'order_num, account, ordr_dt, prod_name, units, wprice, rprice, del_date, special_ords, postbake_adj, notes',
+    note: 'Re-import safe — order_num prevents duplicates',
+  },
 ]
 
 function parseCSV(text) {

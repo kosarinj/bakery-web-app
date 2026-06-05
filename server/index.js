@@ -551,8 +551,11 @@ const EXPORTS = {
                    ['price_id','prod_name','category','whole_price','ret_price','last_update']],
   account_prices: ['SELECT account,prod_name,whole_price,ret_price FROM account_prices ORDER BY account,prod_name',
                    ['account','prod_name','whole_price','ret_price']],
-  ingredients:    ['SELECT name,unit,notes FROM ingredients ORDER BY name',
-                   ['name','unit','notes']],
+  ingredients:    ['SELECT ingr_id,name,unit,cost_cup,cost_pound,cup_pound,notes FROM ingredients ORDER BY name',
+                   ['ingr_id','name','unit','cost_cup','cost_pound','cup_pound','notes']],
+  daily_orders:   [`SELECT order_num,account,ordr_dt,prod_name,units,wprice,rprice,del_date,special_ords,postbake_adj,notes
+                    FROM daily_orders ORDER BY ordr_dt,account,prod_name`,
+                   ['order_num','account','ordr_dt','prod_name','units','wprice','rprice','del_date','special_ords','postbake_adj','notes']],
   recipes:        ['SELECT product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rectext FROM recipes ORDER BY product,sequence,ingredient',
                    ['product','ingredient','sequence','qty','teaspoons','tablespoons','cups','pounds','rectext']],
   inventory:      ['SELECT prod_name,units,sod_inv,location FROM inventory ORDER BY prod_name',
@@ -743,13 +746,51 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
               [col(row,'account'), col(row,'prod_name'), num(row,'whole_price'), num(row,'ret_price')]
             )
             break
-          case 'ingredients':
+          case 'ingredients': {
+            // Access uses 'ingredient' for name, 'record' for ingr_id
+            const iname = col(row,'name') ?? col(row,'ingredient')
+            if (!iname) break
+            const iid = col(row,'ingr_id') ?? col(row,'record')
             await client.query(
-              `INSERT INTO ingredients(name,unit,notes) VALUES($1,$2,$3)
-               ON CONFLICT(name) DO UPDATE SET unit=EXCLUDED.unit,notes=EXCLUDED.notes`,
-              [col(row,'name'), col(row,'unit'), col(row,'notes')]
+              `INSERT INTO ingredients(ingr_id,name,unit,cost_cup,cost_pound,cup_pound,notes)
+               VALUES($1,$2,$3,$4,$5,$6,$7)
+               ON CONFLICT(name) DO UPDATE SET
+                 ingr_id=EXCLUDED.ingr_id,unit=EXCLUDED.unit,
+                 cost_cup=EXCLUDED.cost_cup,cost_pound=EXCLUDED.cost_pound,
+                 cup_pound=EXCLUDED.cup_pound,notes=EXCLUDED.notes`,
+              [iid ? parseInt(iid) : null, iname, col(row,'unit'),
+               col(row,'cost_cup') ? num(row,'cost_cup') : null,
+               col(row,'cost_pound') ? num(row,'cost_pound') : null,
+               col(row,'cup_pound') ? num(row,'cup_pound') : null,
+               col(row,'notes')]
             )
             break
+          }
+          case 'daily_orders': {
+            const pname = col(row,'prod_name')
+            const aname = col(row,'account')
+            if (!pname || !aname) break
+            // Auto-create stubs if missing
+            await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [pname])
+            await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [pname])
+            await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [aname])
+            const onum = col(row,'order_num')
+            await client.query(
+              `INSERT INTO daily_orders(order_num,account,ordr_dt,prod_name,units,wprice,rprice,del_date,special_ords,postbake_adj,last_update)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+               ON CONFLICT(order_num) WHERE order_num IS NOT NULL DO UPDATE SET
+                 units=EXCLUDED.units,wprice=EXCLUDED.wprice,rprice=EXCLUDED.rprice,
+                 del_date=EXCLUDED.del_date,special_ords=EXCLUDED.special_ords,
+                 postbake_adj=EXCLUDED.postbake_adj,last_update=EXCLUDED.last_update`,
+              [onum ? parseInt(onum) : null, aname,
+               parseAccessDate(col(row,'ordr_dt')), pname,
+               num(row,'units'), num(row,'wprice'), num(row,'rprice'),
+               parseAccessDate(col(row,'del_date')),
+               bool(row,'special_ords'), num(row,'postbake_adj'),
+               parseAccessDate(col(row,'last_update')) || new Date().toISOString().slice(0,10)]
+            )
+            break
+          }
           case 'recipes':
             await client.query(
               `INSERT INTO recipes(product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rectext,last_update)

@@ -142,6 +142,16 @@ INSERT INTO users (username, password_hash, role)
 VALUES ('admin', '$2a$10$vtOaNw1pAbFHKsKM5jP1cuDUDeUucg3PTPg95StZX1XgcQdyTWJWK', 'admin')
 ON CONFLICT DO NOTHING;
 
+-- ─── Migrations: extend ingredients table ─────────────────────────────────────
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS ingr_id    INTEGER;
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS cost_cup   NUMERIC(10,4);
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS cost_pound NUMERIC(10,4);
+ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS cup_pound  NUMERIC(10,4);
+
+-- ─── Migrations: extend daily_orders table ────────────────────────────────────
+ALTER TABLE daily_orders ADD COLUMN IF NOT EXISTS order_num INTEGER;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_daily_orders_order_num ON daily_orders(order_num) WHERE order_num IS NOT NULL;
+
 -- ─── Migrations: extend prices table ─────────────────────────────────────────
 ALTER TABLE prices ADD COLUMN IF NOT EXISTS price_id INTEGER;
 
