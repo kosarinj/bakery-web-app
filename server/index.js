@@ -269,14 +269,18 @@ app.get('/api/orders', requireAuth, async (req, res) => {
   if (date) { vals.push(date); conditions.push(`o.ordr_dt = $${vals.length}`) }
   if (account) { vals.push(account); conditions.push(`o.account = $${vals.length}`) }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
-  const { rows } = await query(`
-    SELECT o.*, p.prod_type, p.prod_group
-    FROM daily_orders o
-    JOIN products p ON p.prod_name = o.prod_name
-    ${where}
-    ORDER BY o.account, p.prod_group, o.prod_name
-  `, vals)
-  res.json(rows)
+  try {
+    const { rows } = await query(`
+      SELECT o.*, p.prod_type, p.prod_group
+      FROM daily_orders o
+      LEFT JOIN products p ON p.prod_name = o.prod_name
+      ${where}
+      ORDER BY o.account, p.prod_group, o.prod_name
+    `, vals)
+    res.json(rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 app.post('/api/orders', requireAuth, async (req, res) => {

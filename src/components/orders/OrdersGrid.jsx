@@ -106,7 +106,8 @@ export default function OrdersGrid() {
     if (!calMonth) return
     fetch(`/api/orders/active-dates?month=${calMonth}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(dates => setActiveDates(new Set(dates)))
+      .then(dates => setActiveDates(new Set(Array.isArray(dates) ? dates : [])))
+      .catch(() => {})
   }, [calMonth])
 
   useEffect(() => {
@@ -119,14 +120,15 @@ export default function OrdersGrid() {
       fetch(`/api/orders?date=${date}`, { credentials: 'include' }).then(r => r.json()),
     ])
       .then(([accts, prods, orders]) => {
-        setAccounts(accts); setProducts(prods)
+        setAccounts(Array.isArray(accts) ? accts : [])
+        setProducts(Array.isArray(prods) ? prods : [])
         const map = {}
-        orders.forEach(o => {
+        ;(Array.isArray(orders) ? orders : []).forEach(o => {
           map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
         })
         setOrderMap(map); orderMapRef.current = map; setLoading(false)
       })
-      .catch(e => { setError(e.message); setLoading(false) })
+      .catch(e => { setError(String(e.message || e)); setLoading(false) })
   }, [date])
 
   const saveCell = useCallback(async (account, prod_name, units, curDate) => {
@@ -163,7 +165,7 @@ export default function OrdersGrid() {
       const data = await r.json()
       if (!r.ok) throw new Error(data.error)
       const updated = { ...orderMapRef.current }
-      data.rows.forEach(o => {
+      ;(Array.isArray(data.rows) ? data.rows : []).forEach(o => {
         updated[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
       })
       orderMapRef.current = updated; setOrderMap(updated)
