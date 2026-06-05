@@ -142,6 +142,9 @@ INSERT INTO users (username, password_hash, role)
 VALUES ('admin', '$2a$10$vtOaNw1pAbFHKsKM5jP1cuDUDeUucg3PTPg95StZX1XgcQdyTWJWK', 'admin')
 ON CONFLICT DO NOTHING;
 
+-- ─── Migrations: extend prices table ─────────────────────────────────────────
+ALTER TABLE prices ADD COLUMN IF NOT EXISTS price_id INTEGER;
+
 -- ─── Migrations: extend products table with all Access columns ───────────────
 ALTER TABLE products ADD COLUMN IF NOT EXISTS prod_id       INTEGER;
 ALTER TABLE products ADD COLUMN IF NOT EXISTS upc_code      TEXT;

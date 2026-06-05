@@ -547,8 +547,8 @@ const EXPORTS = {
                     'del_inst','prefix','postord','entire_inv','wrap_muffins','print_inv','next_del',
                     'marketfee','gas','tolls','balance','webname','sendweb','webstart','webend','adj_level',
                     'open_dt','active','notes']],
-  prices:         ['SELECT prod_name,category,whole_price,ret_price FROM prices ORDER BY prod_name,category',
-                   ['prod_name','category','whole_price','ret_price']],
+  prices:         ['SELECT price_id,prod_name,category,whole_price,ret_price,last_update FROM prices ORDER BY prod_name,category',
+                   ['price_id','prod_name','category','whole_price','ret_price','last_update']],
   account_prices: ['SELECT account,prod_name,whole_price,ret_price FROM account_prices ORDER BY account,prod_name',
                    ['account','prod_name','whole_price','ret_price']],
   ingredients:    ['SELECT name,unit,notes FROM ingredients ORDER BY name',
@@ -706,15 +706,24 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             )
             break
           }
-          case 'prices':
+          case 'prices': {
+            // 'record' is the Access numeric ID
+            const pid = col(row,'price_id') ?? col(row,'record')
+            const lu  = parseAccessDate(col(row,'last_update'))
             await client.query(
-              `INSERT INTO prices(prod_name,category,whole_price,ret_price,last_update)
-               VALUES($1,$2,$3,$4,NOW())
+              `INSERT INTO prices(price_id,prod_name,category,whole_price,ret_price,last_update)
+               VALUES($1,$2,$3,$4,$5,$6)
                ON CONFLICT(prod_name,category) DO UPDATE SET
-                 whole_price=EXCLUDED.whole_price,ret_price=EXCLUDED.ret_price,last_update=NOW()`,
-              [col(row,'prod_name'), col(row,'category','wholesale'), num(row,'whole_price'), num(row,'ret_price')]
+                 price_id=EXCLUDED.price_id,
+                 whole_price=EXCLUDED.whole_price,ret_price=EXCLUDED.ret_price,
+                 last_update=EXCLUDED.last_update`,
+              [pid ? parseInt(pid) : null,
+               col(row,'prod_name'), col(row,'category','wholesale'),
+               num(row,'whole_price'), num(row,'ret_price'),
+               lu || new Date().toISOString().slice(0,10)]
             )
             break
+          }
           case 'account_prices':
             await client.query(
               `INSERT INTO account_prices(account,prod_name,whole_price,ret_price,last_update)
