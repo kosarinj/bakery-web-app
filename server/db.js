@@ -16,22 +16,17 @@ const pool = new Pool({
 export const query = (text, params) => pool.query(text, params)
 export default pool
 
-// Run each schema statement individually so one failure doesn't abort the rest
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const schema = readFileSync(join(__dirname, '../db/schema.sql'), 'utf8')
 
-const statements = schema
-  .split(';')
-  .map(s => s.trim())
-  .filter(s => s.length > 0)
-
-;(async () => {
-  for (const stmt of statements) {
-    try {
-      await pool.query(stmt)
-    } catch (e) {
-      console.error('Schema error:', e.message, '\n  Statement:', stmt.slice(0, 80))
+// Try running schema as one batch; if that fails, run each statement individually
+pool.query(schema)
+  .then(() => console.log('Database ready'))
+  .catch(async err => {
+    console.error('Schema batch failed, trying per-statement:', err.message)
+    const stmts = schema.split(';').map(s => s.trim()).filter(Boolean)
+    for (const stmt of stmts) {
+      try { await pool.query(stmt) } catch (e) { console.error(' stmt error:', e.message) }
     }
-  }
-  console.log('Database ready')
-})()
+    console.log('Database ready (per-statement mode)')
+  })

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 
 const EMPTY_NEW = { prod_name: '', prod_type: '', prod_group: '', subtype: '', multiplier: 1, divisor: 1, batch: false, notes: '' }
@@ -111,8 +111,8 @@ export default function ProductsList() {
               </thead>
               <tbody>
                 {Object.entries(groups).map(([group, items]) => (
-                  <>
-                    <tr key={`g-${group}`} className="inv-group-header"><td colSpan={8}>{group}</td></tr>
+                  <Fragment key={group}>
+                    <tr className="inv-group-header"><td colSpan={8}>{group}</td></tr>
                     {items.map(p => (
                       <tr key={p.prod_name} style={{ opacity: p.active ? 1 : 0.5 }}>
                         <td style={{ fontWeight: 600, paddingLeft: 16 }}>{p.prod_name}</td>
@@ -130,7 +130,7 @@ export default function ProductsList() {
                         <td><EditableCell value={p.notes||''} onSave={v=>save(p.prod_name,'notes',v)} type="text" align="left"/></td>
                       </tr>
                     ))}
-                  </>
+                  </Fragment>
                 ))}
                 {adding && (
                   <tr style={{ background: 'var(--cell-edit-bg)' }}>

@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 
 export default function InventoryGrid() {
@@ -66,8 +66,8 @@ export default function InventoryGrid() {
           </thead>
           <tbody>
             {Object.entries(groups).map(([group, items]) => (
-              <>
-                <tr key={`g-${group}`} className="inv-group-header">
+              <Fragment key={group}>
+                <tr className="inv-group-header">
                   <td colSpan={6}>{group}</td>
                 </tr>
                 {items.map(row => (
@@ -105,7 +105,7 @@ export default function InventoryGrid() {
                     </td>
                   </tr>
                 ))}
-              </>
+              </Fragment>
             ))}
           </tbody>
         </table>
