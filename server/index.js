@@ -707,9 +707,19 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             break
           }
           case 'prices': {
-            // 'record' is the Access numeric ID
+            const pname = col(row,'prod_name')
+            if (!pname) break
             const pid = col(row,'price_id') ?? col(row,'record')
             const lu  = parseAccessDate(col(row,'last_update'))
+            // Auto-create product placeholder if it doesn't exist yet
+            await client.query(
+              `INSERT INTO products(prod_name, active) VALUES($1, true) ON CONFLICT DO NOTHING`,
+              [pname]
+            )
+            await client.query(
+              `INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`,
+              [pname]
+            )
             await client.query(
               `INSERT INTO prices(price_id,prod_name,category,whole_price,ret_price,last_update)
                VALUES($1,$2,$3,$4,$5,$6)
@@ -718,7 +728,7 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
                  whole_price=EXCLUDED.whole_price,ret_price=EXCLUDED.ret_price,
                  last_update=EXCLUDED.last_update`,
               [pid ? parseInt(pid) : null,
-               col(row,'prod_name'), col(row,'category','wholesale'),
+               pname, col(row,'category','wholesale'),
                num(row,'whole_price'), num(row,'ret_price'),
                lu || new Date().toISOString().slice(0,10)]
             )
