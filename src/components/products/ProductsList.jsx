@@ -68,13 +68,14 @@ export default function ProductsList() {
 
   if (loading) return <div className="loading">Loading products...</div>
 
+  const safeProducts = Array.isArray(products) ? products : []
   const q = search.toLowerCase()
   const filtered = q
-    ? products.filter(p =>
+    ? safeProducts.filter(p =>
         (p.prod_name||'').toLowerCase().includes(q) ||
         (p.prod_type||'').toLowerCase().includes(q) ||
         (p.prod_group||'').toLowerCase().includes(q))
-    : products.slice(0, MAX_ROWS)
+    : safeProducts.slice(0, MAX_ROWS)
 
   const totalShown = filtered.length
   const groups = filtered.reduce((acc, p) => {
@@ -102,7 +103,7 @@ export default function ProductsList() {
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 200 }}
         />
         <span className="toolbar-info">
-          {search ? `${totalShown} of ${products.length}` : `${products.length} total — showing first ${MAX_ROWS}`}
+          {search ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total — showing first ${MAX_ROWS}`}
         </span>
         <label style={{ gap: 6 }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
@@ -176,7 +177,7 @@ export default function ProductsList() {
                       onChange={e=>setNewProd(p=>({...p,notes:e.target.value}))}/></td>
                   </tr>
                 )}
-                {products.length===0&&!adding&&<tr><td colSpan={8} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No products yet.</td></tr>}
+                {safeProducts.length===0&&!adding&&<tr><td colSpan={8} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No products yet.</td></tr>}
               </tbody>
             </table>
           )}
