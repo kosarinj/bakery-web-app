@@ -2,6 +2,7 @@ import { useState, useEffect, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 
 const EMPTY_NEW = { prod_name: '', prod_type: '', prod_group: '', subtype: '', multiplier: 1, divisor: 1, batch: false, notes: '' }
+const MAX_ROWS = 100
 
 const TABS = [
   { key: 'basic',  label: 'Basic' },
@@ -21,6 +22,7 @@ export default function ProductsList() {
   const [adding, setAdding] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
   const [tab, setTab] = useState('basic')
+  const [search, setSearch] = useState('')
 
   useEffect(() => { load() }, [showInactive])
 
@@ -63,7 +65,16 @@ export default function ProductsList() {
 
   if (loading) return <div className="loading">Loading products...</div>
 
-  const groups = products.reduce((acc, p) => {
+  const q = search.toLowerCase()
+  const filtered = q
+    ? products.filter(p =>
+        (p.prod_name||'').toLowerCase().includes(q) ||
+        (p.prod_type||'').toLowerCase().includes(q) ||
+        (p.prod_group||'').toLowerCase().includes(q))
+    : products.slice(0, MAX_ROWS)
+
+  const totalShown = filtered.length
+  const groups = filtered.reduce((acc, p) => {
     const g = p.prod_group || '—'
     if (!acc[g]) acc[g] = []
     acc[g].push(p)
@@ -80,7 +91,16 @@ export default function ProductsList() {
               onClick={() => setTab(t.key)}>{t.label}</button>
           ))}
         </div>
-        <span className="toolbar-info">{products.length} products</span>
+        <input
+          type="text"
+          placeholder="Search products…"
+          value={search}
+          onChange={e => setSearch(e.target.value)}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 200 }}
+        />
+        <span className="toolbar-info">
+          {search ? `${totalShown} of ${products.length}` : `${products.length} total — showing first ${MAX_ROWS}`}
+        </span>
         <label style={{ gap: 6 }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show inactive
