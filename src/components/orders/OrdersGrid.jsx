@@ -120,8 +120,10 @@ export default function OrdersGrid() {
       fetch(`/api/orders?date=${date}`, { credentials: 'include' }).then(r => r.json()),
     ])
       .then(([accts, prods, orders]) => {
-        setAccounts(Array.isArray(accts) ? accts : [])
-        setProducts(Array.isArray(prods) ? prods : [])
+        if (!Array.isArray(accts)) { setError(`Accounts load failed: ${accts?.error || 'unexpected response'}`); setLoading(false); return }
+        if (!Array.isArray(prods)) { setError(`Products load failed: ${prods?.error || 'unexpected response'}`); setLoading(false); return }
+        setAccounts(accts)
+        setProducts(prods)
         const map = {}
         ;(Array.isArray(orders) ? orders : []).forEach(o => {
           map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
