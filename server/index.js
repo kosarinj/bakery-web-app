@@ -1,29 +1,32 @@
 import 'dotenv/config'
 import express from 'express'
 import session from 'express-session'
+import connectPgSimple from 'connect-pg-simple'
 import cors from 'cors'
 import bcrypt from 'bcryptjs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pool, { query } from './db.js'
 
+const PgStore = connectPgSimple(session)
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const isProd = process.env.NODE_ENV === 'production'
 
 const app = express()
 const PORT = process.env.PORT || 3002
 
-app.set('trust proxy', 1)  // required for secure cookies behind Railway's proxy
+app.set('trust proxy', 1)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json({ limit: '10mb' }))
 app.use(session({
+  store: new PgStore({ pool, createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'bakery-secret-change-me',
   resave: false,
   saveUninitialized: false,
   cookie: {
     secure: isProd,
-    sameSite: isProd ? 'none' : 'lax',
-    maxAge: 8 * 60 * 60 * 1000
+    sameSite: 'lax',
+    maxAge: 24 * 60 * 60 * 1000  // 24 hours
   }
 }))
 
