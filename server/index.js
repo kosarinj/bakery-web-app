@@ -333,6 +333,21 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 })
 
 // Orders summary: units per product for a given date (for bake list / have-need)
+app.get('/api/dashboard', requireAuth, async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10)
+  const [accts, prods, orders] = await Promise.all([
+    query('SELECT COUNT(*) FROM accounts WHERE active=true'),
+    query('SELECT COUNT(*) FROM products WHERE active=true'),
+    query('SELECT COUNT(DISTINCT account) AS orders_today, COUNT(*) AS order_lines FROM daily_orders WHERE ordr_dt=$1', [today]),
+  ])
+  res.json({
+    accounts:     parseInt(accts.rows[0].count),
+    products:     parseInt(prods.rows[0].count),
+    orders_today: parseInt(orders.rows[0].orders_today),
+    order_lines:  parseInt(orders.rows[0].order_lines),
+  })
+})
+
 app.get('/api/orders/active-dates', requireAuth, async (req, res) => {
   const { month } = req.query
   if (!month) return res.json([])

@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const NAV_ITEMS = [
+  { to: '/',          icon: '🏠', label: 'Dashboard', end: true },
   { to: '/orders',    icon: '📋', label: 'Orders' },
   { to: '/inventory', icon: '📦', label: 'Inventory' },
   { to: '/products',  icon: '🥐', label: 'Products' },
@@ -39,8 +40,8 @@ export default function Layout({ user, setUser }) {
 
       <div className="app-layout">
         <nav className="app-nav">
-          {NAV_ITEMS.map(({ to, icon, label }) => (
-            <NavLink key={to} to={to}>
+          {NAV_ITEMS.map(({ to, icon, label, end }) => (
+            <NavLink key={to} to={to} end={end}>
               <span className="nav-icon">{icon}</span>
               {label}
             </NavLink>

@@ -10,6 +10,7 @@ import AccountsList from './components/accounts/AccountsList'
 import PriceGrid from './components/pricing/PriceGrid'
 import BakeSchedule from './components/baking/BakeSchedule'
 import ImportExport from './components/import-export/ImportExport'
+import Dashboard from './components/Dashboard'
 
 export default function App() {
   const [user, setUser] = useState(null)
@@ -38,7 +39,7 @@ export default function App() {
           path="/"
           element={user ? <Layout user={user} setUser={setUser} /> : <Navigate to="/login" replace />}
         >
-          <Route index element={<Navigate to="/orders" replace />} />
+          <Route index element={<Dashboard />} />
           <Route path="orders" element={<OrdersGrid />} />
           <Route path="inventory" element={<InventoryGrid />} />
           <Route path="products" element={<ProductsList />} />
