@@ -15,7 +15,7 @@ const PORT = process.env.PORT || 3002
 
 app.set('trust proxy', 1)  // required for secure cookies behind Railway's proxy
 app.use(cors({ origin: true, credentials: true }))
-app.use(express.json())
+app.use(express.json({ limit: '10mb' }))
 app.use(session({
   secret: process.env.SESSION_SECRET || 'bakery-secret-change-me',
   resave: false,
@@ -101,7 +101,11 @@ app.post('/api/products', requireAuth, async (req, res) => {
 })
 
 app.patch('/api/products/:name', requireAuth, async (req, res) => {
-  const fields = ['prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes']
+  const fields = [
+    'prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes',
+    'prod_id','upc_code','label1','label2','label3','weight','color1','color2','color3',
+    'subtype','ingsize','labelsize','weightsize','ingheight','whichlabel','labor_weight','webtype','gluten_free'
+  ]
   const updates = []
   const vals = []
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
@@ -525,8 +529,13 @@ function toCSV(rows, cols) {
 }
 
 const EXPORTS = {
-  products:       ['SELECT prod_name,prod_type,prod_group,barcode,multiplier,divisor,batch,active,notes FROM products ORDER BY prod_group,prod_name',
-                   ['prod_name','prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes']],
+  products:       [`SELECT prod_name,prod_id,prod_type,prod_group,subtype,multiplier,divisor,batch,active,gluten_free,
+                          barcode,upc_code,label1,label2,label3,weight,color1,color2,color3,
+                          ingsize,labelsize,weightsize,ingheight,whichlabel,labor_weight,webtype,notes
+                   FROM products ORDER BY prod_group,prod_name`,
+                   ['prod_name','prod_id','prod_type','prod_group','subtype','multiplier','divisor','batch','active','gluten_free',
+                    'barcode','upc_code','label1','label2','label3','weight','color1','color2','color3',
+                    'ingsize','labelsize','weightsize','ingheight','whichlabel','labor_weight','webtype','notes']],
   accounts:       [`SELECT name,acct_id,acctgrp,subcategory,category,route,sequence,region,day_of_week,
                           manager,owner,address,city,state,phone,fax,email,
                           del_inst,prefix,postord,entire_inv,wrap_muffins,print_inv,next_del,
@@ -594,8 +603,9 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
     Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
   )
 
-  const client = await pool.connect()
+  let client
   try {
+    client = await pool.connect()
     await client.query('BEGIN')
     let count = 0
     const errors = []
@@ -603,22 +613,53 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
     for (const row of norm) {
       try {
         switch (req.params.table) {
-          case 'products':
+          case 'products': {
+            // Access uses 'divide_by' for divisor, 'inactive' (inverted) for active, 'prod_ID' for prod_id
+            const divisor  = num(row,'divisor') || num(row,'divide_by',1)
+            const pid      = col(row,'prod_id') ?? col(row,'prod_id')
+            const inactive = bool(row,'inactive',false)
+            const isActive = col(row,'active') !== null ? bool(row,'active',true) : !inactive
             await client.query(
-              `INSERT INTO products(prod_name,prod_type,prod_group,barcode,multiplier,divisor,batch,active,notes)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9)
+              `INSERT INTO products(
+                 prod_name,prod_id,prod_type,prod_group,subtype,multiplier,divisor,batch,active,gluten_free,
+                 barcode,upc_code,label1,label2,label3,weight,color1,color2,color3,
+                 ingsize,labelsize,weightsize,ingheight,whichlabel,labor_weight,webtype,notes)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,$23,$24,$25,$26,$27)
                ON CONFLICT(prod_name) DO UPDATE SET
-                 prod_type=EXCLUDED.prod_type,prod_group=EXCLUDED.prod_group,barcode=EXCLUDED.barcode,
-                 multiplier=EXCLUDED.multiplier,divisor=EXCLUDED.divisor,batch=EXCLUDED.batch,
-                 active=EXCLUDED.active,notes=EXCLUDED.notes`,
-              [col(row,'prod_name'), col(row,'prod_type'), col(row,'prod_group'), col(row,'barcode'),
-               num(row,'multiplier',1), num(row,'divisor',1), bool(row,'batch'), bool(row,'active',true), col(row,'notes')]
+                 prod_id=EXCLUDED.prod_id,prod_type=EXCLUDED.prod_type,prod_group=EXCLUDED.prod_group,
+                 subtype=EXCLUDED.subtype,multiplier=EXCLUDED.multiplier,divisor=EXCLUDED.divisor,
+                 batch=EXCLUDED.batch,active=EXCLUDED.active,gluten_free=EXCLUDED.gluten_free,
+                 barcode=EXCLUDED.barcode,upc_code=EXCLUDED.upc_code,
+                 label1=EXCLUDED.label1,label2=EXCLUDED.label2,label3=EXCLUDED.label3,
+                 weight=EXCLUDED.weight,color1=EXCLUDED.color1,color2=EXCLUDED.color2,color3=EXCLUDED.color3,
+                 ingsize=EXCLUDED.ingsize,labelsize=EXCLUDED.labelsize,weightsize=EXCLUDED.weightsize,
+                 ingheight=EXCLUDED.ingheight,whichlabel=EXCLUDED.whichlabel,
+                 labor_weight=EXCLUDED.labor_weight,webtype=EXCLUDED.webtype,notes=EXCLUDED.notes`,
+              [
+                col(row,'prod_name'),
+                pid ? parseInt(pid) : null,
+                col(row,'prod_type'), col(row,'prod_group'), col(row,'subtype'),
+                num(row,'multiplier',1), divisor,
+                bool(row,'batch'), isActive, bool(row,'gluten_free'),
+                col(row,'barcode'), col(row,'upc_code') ?? col(row,'upc_code'),
+                col(row,'label1'), col(row,'label2'), col(row,'label3'),
+                col(row,'weight') ? num(row,'weight') : null,
+                col(row,'color1'), col(row,'color2'), col(row,'color3'),
+                col(row,'ingsize') ? num(row,'ingsize') : null,
+                col(row,'labelsize') ? num(row,'labelsize') : null,
+                col(row,'weightsize') ? num(row,'weightsize') : null,
+                col(row,'ingheight') ? num(row,'ingheight') : null,
+                col(row,'whichlabel'),
+                col(row,'labor_weight') ? num(row,'labor_weight') : null,
+                col(row,'webtype'), col(row,'notes')
+              ]
             )
             await client.query(
               `INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`,
               [col(row,'prod_name')]
             )
             break
+          }
           case 'accounts': {
             // 'account' col in Access = numeric ID; 'market_fee' = our marketfee
             const mfee = num(row, 'marketfee') || num(row, 'market_fee')
@@ -723,10 +764,10 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
     await client.query('COMMIT')
     res.json({ imported: count, errors })
   } catch (e) {
-    await client.query('ROLLBACK')
+    if (client) try { await client.query('ROLLBACK') } catch {}
     res.status(400).json({ error: e.message })
   } finally {
-    client.release()
+    if (client) client.release()
   }
 })
 

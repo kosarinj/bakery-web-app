@@ -142,6 +142,26 @@ INSERT INTO users (username, password_hash, role)
 VALUES ('admin', '$2a$10$vtOaNw1pAbFHKsKM5jP1cuDUDeUucg3PTPg95StZX1XgcQdyTWJWK', 'admin')
 ON CONFLICT DO NOTHING;
 
+-- ─── Migrations: extend products table with all Access columns ───────────────
+ALTER TABLE products ADD COLUMN IF NOT EXISTS prod_id       INTEGER;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS upc_code      TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS label1        TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS label2        TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS label3        TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS weight        NUMERIC(10,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS color1        TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS color2        TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS color3        TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS subtype       TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS ingsize       NUMERIC(10,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS labelsize     NUMERIC(10,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS weightsize    NUMERIC(10,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS ingheight     NUMERIC(10,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS whichlabel    TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS labor_weight  NUMERIC(10,4);
+ALTER TABLE products ADD COLUMN IF NOT EXISTS webtype       TEXT;
+ALTER TABLE products ADD COLUMN IF NOT EXISTS gluten_free   BOOLEAN DEFAULT FALSE;
+
 -- ─── Migrations: extend accounts table with all Access columns ──────────────
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS acct_id       INTEGER;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS subcategory   TEXT;
