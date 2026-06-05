@@ -12,7 +12,10 @@ export default function InventoryGrid() {
     setLoading(true)
     fetch('/api/inventory', { credentials: 'include' })
       .then(r => r.json())
-      .then(data => { setRows(data); setLoading(false) })
+      .then(data => {
+        if (!Array.isArray(data)) { setError(data?.error || 'Failed to load inventory'); setLoading(false); return }
+        setRows(data); setLoading(false)
+      })
       .catch(e => { setError(e.message); setLoading(false) })
   }
 

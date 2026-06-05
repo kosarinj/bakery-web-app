@@ -25,8 +25,8 @@ export default function BakeSchedule() {
       fetch(`/api/have-need?date=${date}`, { credentials: 'include' }).then(r => r.json()),
     ])
       .then(([bl, hn]) => {
-        setBakeList(bl)
-        setHaveNeed(hn)
+        setBakeList(Array.isArray(bl) ? bl : [])
+        setHaveNeed(Array.isArray(hn) ? hn : [])
         setLoading(false)
       })
       .catch(e => { setError(e.message); setLoading(false) })

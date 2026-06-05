@@ -30,7 +30,10 @@ export default function ProductsList() {
     setLoading(true)
     fetch(`/api/products${showInactive ? '?all=1' : ''}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(data => { setProducts(data); setLoading(false) })
+      .then(data => {
+        if (!Array.isArray(data)) { setError(data?.error || 'Failed to load products'); setLoading(false); return }
+        setProducts(data); setLoading(false)
+      })
       .catch(e => { setError(e.message); setLoading(false) })
   }
 

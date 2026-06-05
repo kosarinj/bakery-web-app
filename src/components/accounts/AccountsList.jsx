@@ -38,7 +38,10 @@ export default function AccountsList() {
     setLoading(true)
     fetch(`/api/accounts${showInactive ? '?all=1' : ''}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(data => { setAccounts(data); setLoading(false) })
+      .then(data => {
+        if (!Array.isArray(data)) { setError(data?.error || 'Failed to load accounts'); setLoading(false); return }
+        setAccounts(data); setLoading(false)
+      })
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
