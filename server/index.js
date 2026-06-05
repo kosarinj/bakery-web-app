@@ -333,6 +333,18 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 })
 
 // Orders summary: units per product for a given date (for bake list / have-need)
+app.get('/api/orders/active-dates', requireAuth, async (req, res) => {
+  const { month } = req.query
+  if (!month) return res.json([])
+  const { rows } = await query(
+    `SELECT DISTINCT ordr_dt::text AS date FROM daily_orders
+     WHERE ordr_dt >= $1::date AND ordr_dt < ($1::date + INTERVAL '1 month')
+     ORDER BY ordr_dt`,
+    [month + '-01']
+  )
+  res.json(rows.map(r => r.date))
+})
+
 app.get('/api/orders/summary', requireAuth, async (req, res) => {
   const { date } = req.query
   const dateVal = date || new Date().toISOString().slice(0,10)
