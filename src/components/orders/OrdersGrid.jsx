@@ -114,10 +114,13 @@ export default function OrdersGrid() {
     if (!date) return
     if (date.slice(0, 7) !== calMonth) setCalMonth(date.slice(0, 7))
     setLoading(true); setError('')
+    const get = url => fetch(url, { credentials: 'include' })
+      .then(r => r.json().then(d => { if (!r.ok) throw new Error(`${r.status}: ${d?.error || r.statusText}`); return d }))
+
     Promise.all([
-      fetch('/api/accounts', { credentials: 'include' }).then(r => r.json()),
-      fetch('/api/products', { credentials: 'include' }).then(r => r.json()),
-      fetch(`/api/orders?date=${date}`, { credentials: 'include' }).then(r => r.json()),
+      get('/api/accounts'),
+      get('/api/products'),
+      get(`/api/orders?date=${date}`),
     ])
       .then(([accts, prods, orders]) => {
         if (!Array.isArray(accts)) { setError(`Accounts load failed: ${accts?.error || 'unexpected response'}`); setLoading(false); return }

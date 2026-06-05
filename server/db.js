@@ -16,10 +16,22 @@ const pool = new Pool({
 export const query = (text, params) => pool.query(text, params)
 export default pool
 
-// Auto-run schema on startup (all statements use IF NOT EXISTS / ON CONFLICT DO NOTHING)
+// Run each schema statement individually so one failure doesn't abort the rest
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const schema = readFileSync(join(__dirname, '../db/schema.sql'), 'utf8')
 
-pool.query(schema)
-  .then(() => console.log('Database ready'))
-  .catch(err => console.error('Schema init error:', err.message))
+const statements = schema
+  .split(';')
+  .map(s => s.trim())
+  .filter(s => s.length > 0)
+
+;(async () => {
+  for (const stmt of statements) {
+    try {
+      await pool.query(stmt)
+    } catch (e) {
+      console.error('Schema error:', e.message, '\n  Statement:', stmt.slice(0, 80))
+    }
+  }
+  console.log('Database ready')
+})()

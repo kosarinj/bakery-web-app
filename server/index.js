@@ -76,12 +76,16 @@ app.patch('/api/settings/:key', requireAuth, async (req, res) => {
 
 app.get('/api/products', requireAuth, async (req, res) => {
   const all = req.query.all === '1'
-  const { rows } = await query(
-    all
-      ? 'SELECT * FROM products ORDER BY prod_group, prod_name'
-      : 'SELECT * FROM products WHERE active=true ORDER BY prod_group, prod_name'
-  )
-  res.json(rows)
+  try {
+    const { rows } = await query(
+      all
+        ? 'SELECT * FROM products ORDER BY prod_group, prod_name'
+        : 'SELECT * FROM products WHERE active=true ORDER BY prod_group, prod_name'
+    )
+    res.json(rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 app.post('/api/products', requireAuth, async (req, res) => {
@@ -119,12 +123,16 @@ app.patch('/api/products/:name', requireAuth, async (req, res) => {
 
 app.get('/api/accounts', requireAuth, async (req, res) => {
   const all = req.query.all === '1'
-  const { rows } = await query(
-    all
-      ? 'SELECT * FROM accounts ORDER BY sequence, name'
-      : 'SELECT * FROM accounts WHERE active=true ORDER BY sequence, name'
-  )
-  res.json(rows)
+  try {
+    const { rows } = await query(
+      all
+        ? 'SELECT * FROM accounts ORDER BY sequence, name'
+        : 'SELECT * FROM accounts WHERE active=true ORDER BY sequence, name'
+    )
+    res.json(rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 app.post('/api/accounts', requireAuth, async (req, res) => {
