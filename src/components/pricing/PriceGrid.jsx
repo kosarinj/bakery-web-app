@@ -6,6 +6,7 @@ export default function PriceGrid() {
   const [accounts, setAccounts] = useState([])
   const [selectedAccount, setSelectedAccount] = useState('')
   const [acctPrices, setAcctPrices] = useState({})
+  const [search, setSearch] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [mode, setMode] = useState('standard')  // 'standard' | 'account'
@@ -83,7 +84,11 @@ export default function PriceGrid() {
 
   if (loading) return <div className="loading">Loading prices...</div>
 
-  const groups = rows.reduce((acc, r) => {
+  const filteredRows = search
+    ? rows.filter(r => (r.prod_name||'').toLowerCase().includes(search.toLowerCase()) || (r.prod_group||'').toLowerCase().includes(search.toLowerCase()))
+    : rows
+
+  const groups = filteredRows.reduce((acc, r) => {
     const g = r.prod_group || 'Other'
     if (!acc[g]) acc[g] = []
     acc[g].push(r)
@@ -117,7 +122,9 @@ export default function PriceGrid() {
           </label>
         )}
 
-        <span className="toolbar-info">{rows.length} products</span>
+        <input type="text" placeholder="Search products…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 180 }} />
+        <span className="toolbar-info">{filteredRows.length} of {rows.length}</span>
       </div>
 
       {error && <div className="error-message">{error}</div>}

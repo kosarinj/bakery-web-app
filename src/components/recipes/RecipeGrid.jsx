@@ -8,6 +8,7 @@ export default function RecipeGrid() {
   const [ingredients, setIngredients] = useState([])
   const [selectedProduct, setSelectedProduct] = useState('')
   const [rows, setRows] = useState([])
+  const [productSearch, setProductSearch] = useState('')
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
   const [newRow, setNewRow] = useState(EMPTY_NEW)
@@ -89,14 +90,18 @@ export default function RecipeGrid() {
         <div style={{ fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em', color: 'var(--text-muted)', marginBottom: 6 }}>
           Products
         </div>
+        <input type="text" placeholder="Search…" value={productSearch} onChange={e => setProductSearch(e.target.value)}
+          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, marginBottom: 4, boxSizing: 'border-box' }} />
         <select
           value={selectedProduct}
           onChange={e => setSelectedProduct(e.target.value)}
           size={Math.min(products.length + 1, 20)}
         >
-          {products.map(p => (
-            <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>
-          ))}
+          {products
+            .filter(p => !productSearch || p.prod_name.toLowerCase().includes(productSearch.toLowerCase()))
+            .map(p => (
+              <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>
+            ))}
         </select>
       </div>
 

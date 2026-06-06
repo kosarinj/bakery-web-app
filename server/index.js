@@ -80,11 +80,13 @@ app.patch('/api/settings/:key', requireAuth, async (req, res) => {
 app.get('/api/products', requireAuth, async (req, res) => {
   const all = req.query.all === '1'
   try {
-    const { rows } = await query(
-      all
-        ? 'SELECT * FROM products ORDER BY prod_group, prod_name'
-        : 'SELECT * FROM products WHERE active=true ORDER BY prod_group, prod_name'
-    )
+    const { rows } = await query(`
+      SELECT p.*,
+             EXISTS(SELECT 1 FROM recipes r WHERE r.product = p.prod_name) AS has_recipe
+      FROM products p
+      ${all ? '' : 'WHERE p.active = true'}
+      ORDER BY p.prod_group, p.prod_name
+    `)
     res.json(rows)
   } catch (e) {
     res.status(500).json({ error: e.message })

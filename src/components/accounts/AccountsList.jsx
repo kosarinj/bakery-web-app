@@ -31,6 +31,7 @@ export default function AccountsList() {
   const [adding, setAdding] = useState(false)
   const [showInactive, setShowInactive] = useState(false)
   const [tab, setTab] = useState('basic')
+  const [search, setSearch] = useState('')
 
   useEffect(() => { load() }, [showInactive])
 
@@ -77,6 +78,10 @@ export default function AccountsList() {
   if (loading) return <div className="loading">Loading accounts...</div>
 
   const fmtDate = v => v ? new Date(v).toLocaleDateString() : ''
+  const q = search.toLowerCase()
+  const visibleAccounts = q
+    ? accounts.filter(a => (a.name||'').toLowerCase().includes(q) || (a.acctgrp||'').toLowerCase().includes(q) || (a.route||'').toLowerCase().includes(q))
+    : accounts
 
   return (
     <div>
@@ -90,7 +95,9 @@ export default function AccountsList() {
             >{t.label}</button>
           ))}
         </div>
-        <span className="toolbar-info">{accounts.length} accounts</span>
+        <input type="text" placeholder="Search accounts…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 180 }} />
+        <span className="toolbar-info">{visibleAccounts.length} of {accounts.length}</span>
         <label style={{ gap: 6 }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show inactive
@@ -124,7 +131,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map(a => (
+                {visibleAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.acctgrp||''} onSave={v=>save(a.name,'acctgrp',v)} type="text" align="left"/></td>
@@ -200,7 +207,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map(a => (
+                {visibleAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.address||''} onSave={v=>save(a.name,'address',v)} type="text" align="left"/></td>
@@ -237,7 +244,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map(a => (
+                {visibleAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.del_inst||''} onSave={v=>save(a.name,'del_inst',v)} type="text" align="left"/></td>
@@ -273,7 +280,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {accounts.map(a => (
+                {visibleAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.webname||''} onSave={v=>save(a.name,'webname',v)} type="text" align="left"/></td>

@@ -139,7 +139,10 @@ export default function ProductsList() {
                     <tr className="inv-group-header"><td colSpan={8}>{group}</td></tr>
                     {items.map(p => (
                       <tr key={p.prod_name} style={{ opacity: p.active ? 1 : 0.5 }}>
-                        <td style={{ fontWeight: 600, paddingLeft: 16 }}>{p.prod_name}</td>
+                        <td style={{ fontWeight: 600, paddingLeft: 16 }}>
+                          {p.prod_name}
+                          {p.has_recipe && <span style={{ marginLeft: 6, color: '#16a34a', fontSize: 11, fontWeight: 700 }} title="Has recipe">●</span>}
+                        </td>
                         <td><EditableCell value={p.prod_type||''} onSave={v=>save(p.prod_name,'prod_type',v)} type="text" align="left"/></td>
                         <td><EditableCell value={p.prod_group||''} onSave={v=>save(p.prod_name,'prod_group',v)} type="text" align="left"/></td>
                         <td><EditableCell value={p.subtype||''} onSave={v=>save(p.prod_name,'subtype',v)} type="text" align="left"/></td>
@@ -203,7 +206,10 @@ export default function ProductsList() {
               <tbody>
                 {products.map(p => (
                   <tr key={p.prod_name} style={{ opacity: p.active ? 1 : 0.5 }}>
-                    <td style={{ fontWeight: 500 }}>{p.prod_name}</td>
+                    <td style={{ fontWeight: 500 }}>
+                      {p.prod_name}
+                      {p.has_recipe && <span style={{ marginLeft: 6, color: '#16a34a', fontSize: 11, fontWeight: 700 }} title="Has recipe">●</span>}
+                    </td>
                     <td><EditableCell value={p.label1||''} onSave={v=>save(p.prod_name,'label1',v)} type="text" align="left"/></td>
                     <td><EditableCell value={p.label2||''} onSave={v=>save(p.prod_name,'label2',v)} type="text" align="left"/></td>
                     <td><EditableCell value={p.label3||''} onSave={v=>save(p.prod_name,'label3',v)} type="text" align="left"/></td>
@@ -240,7 +246,10 @@ export default function ProductsList() {
               <tbody>
                 {products.map(p => (
                   <tr key={p.prod_name} style={{ opacity: p.active ? 1 : 0.5 }}>
-                    <td style={{ fontWeight: 500 }}>{p.prod_name}</td>
+                    <td style={{ fontWeight: 500 }}>
+                      {p.prod_name}
+                      {p.has_recipe && <span style={{ marginLeft: 6, color: '#16a34a', fontSize: 11, fontWeight: 700 }} title="Has recipe">●</span>}
+                    </td>
                     <td><EditableCell value={p.barcode||''} onSave={v=>save(p.prod_name,'barcode',v)} type="text" align="left"/></td>
                     <td><EditableCell value={p.upc_code||''} onSave={v=>save(p.prod_name,'upc_code',v)} type="text" align="left"/></td>
                     <td><EditableCell value={parseFloat(p.multiplier)||1} onSave={v=>save(p.prod_name,'multiplier',v)} type="number" align="right"/></td>
