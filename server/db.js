@@ -28,7 +28,11 @@ async function initDB() {
     `SELECT 1 FROM information_schema.columns
      WHERE table_name='recipes' AND column_name='recipe_id' LIMIT 1`
   )
-  if (recipeCheck.length > 0) {
+  // Check for track_tix table (newest addition)
+  const { rows: tixCheck } = await pool.query(
+    `SELECT 1 FROM information_schema.tables WHERE table_name='track_tix' LIMIT 1`
+  )
+  if (recipeCheck.length > 0 && tixCheck.length > 0) {
     console.log('Database ready')
     return
   }

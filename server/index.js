@@ -566,6 +566,120 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
+// ─── Billing / Track Tickets ───────────────────────────────────────────────
+
+// Generate bills for a delivery date — creates/updates track_tix from orders
+app.post('/api/billing/generate', requireAuth, async (req, res) => {
+  const { del_date } = req.body
+  if (!del_date) return res.status(400).json({ error: 'del_date required' })
+  try {
+    // Compute totals per account for that delivery date
+    const { rows: totals } = await query(`
+      SELECT o.account,
+             SUM(o.wprice * o.units) AS total,
+             SUM(o.units)            AS total_units,
+             COUNT(*)                AS line_items
+      FROM daily_orders o
+      WHERE o.del_date = $1 OR o.ordr_dt = $1
+      GROUP BY o.account
+      ORDER BY o.account
+    `, [del_date])
+
+    let created = 0, updated = 0
+    for (const row of totals) {
+      const result = await query(`
+        INSERT INTO track_tix(tix_date, account, total, last_update)
+        VALUES($1, $2, $3, NOW())
+        ON CONFLICT(tix_date, account) DO UPDATE SET
+          total=EXCLUDED.total, last_update=NOW()
+        RETURNING (xmax = 0) AS inserted
+      `, [del_date, row.account, row.total])
+      result.rows[0]?.inserted ? created++ : updated++
+    }
+    res.json({ created, updated, accounts: totals.length })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// List tickets — supports date range and account filter
+app.get('/api/billing/tickets', requireAuth, async (req, res) => {
+  const { from, to, account, unpaid_only } = req.query
+  const conditions = ['1=1']
+  const vals = []
+  if (from)   { vals.push(from);    conditions.push(`t.tix_date >= $${vals.length}`) }
+  if (to)     { vals.push(to);      conditions.push(`t.tix_date <= $${vals.length}`) }
+  if (account){ vals.push(account); conditions.push(`t.account = $${vals.length}`) }
+  if (unpaid_only === '1') conditions.push('t.total > t.paid')
+  try {
+    const { rows } = await query(`
+      SELECT t.*, (t.total - t.paid) AS outstanding,
+             a.route, a.acctgrp, a.category
+      FROM track_tix t
+      LEFT JOIN accounts a ON a.name = t.account
+      WHERE ${conditions.join(' AND ')}
+      ORDER BY t.tix_date DESC, t.account
+    `, vals)
+    res.json(rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Update paid amount for a ticket
+app.patch('/api/billing/tickets/:id', requireAuth, async (req, res) => {
+  const { paid, notes } = req.body
+  try {
+    await query(
+      `UPDATE track_tix SET paid=$1, notes=$2, last_update=NOW() WHERE id=$3`,
+      [paid, notes, req.params.id]
+    )
+    res.json({ success: true })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Pay in full — set paid = total for selected tickets
+app.post('/api/billing/pay-full', requireAuth, async (req, res) => {
+  const { ids } = req.body   // array of ticket IDs
+  if (!Array.isArray(ids) || !ids.length) return res.json({ updated: 0 })
+  try {
+    const { rowCount } = await query(
+      `UPDATE track_tix SET paid=total, last_update=NOW() WHERE id = ANY($1::int[])`,
+      [ids]
+    )
+    res.json({ updated: rowCount })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Aged receivables summary
+app.get('/api/billing/aged', requireAuth, async (req, res) => {
+  const today = new Date().toISOString().slice(0, 10)
+  try {
+    const { rows } = await query(`
+      SELECT account,
+             SUM(total - paid)                                           AS total_outstanding,
+             SUM(CASE WHEN tix_date >= CURRENT_DATE - 30  THEN total - paid ELSE 0 END) AS age_0_30,
+             SUM(CASE WHEN tix_date  < CURRENT_DATE - 30
+                       AND tix_date >= CURRENT_DATE - 60  THEN total - paid ELSE 0 END) AS age_31_60,
+             SUM(CASE WHEN tix_date  < CURRENT_DATE - 60
+                       AND tix_date >= CURRENT_DATE - 90  THEN total - paid ELSE 0 END) AS age_61_90,
+             SUM(CASE WHEN tix_date  < CURRENT_DATE - 90  THEN total - paid ELSE 0 END) AS age_90_plus,
+             MAX(tix_date)                                               AS last_bill_date
+      FROM track_tix
+      WHERE total > paid
+      GROUP BY account
+      ORDER BY total_outstanding DESC
+    `, [])
+    res.json(rows)
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Recipe Generator ──────────────────────────────────────────────────────
 
 function scaleIngredients(rows, factor) {
@@ -696,6 +810,9 @@ const EXPORTS = {
                    ['account','prod_name','whole_price','ret_price']],
   ingredients:    ['SELECT ingr_id,name,unit,cost_cup,cost_pound,cup_pound,notes FROM ingredients ORDER BY name',
                    ['ingr_id','name','unit','cost_cup','cost_pound','cup_pound','notes']],
+  track_tix:      [`SELECT t.id,t.tix_date,t.account,t.total,t.paid,(t.total-t.paid) AS outstanding,t.notes,t.last_update
+                   FROM track_tix t ORDER BY t.tix_date DESC, t.account`,
+                   ['id','tix_date','account','total','paid','outstanding','notes','last_update']],
   daily_orders:   [`SELECT order_num,account,ordr_dt,prod_name,units,wprice,rprice,del_date,special_ords,postbake_adj,notes
                     FROM daily_orders ORDER BY ordr_dt,account,prod_name`,
                    ['order_num','account','ordr_dt','prod_name','units','wprice','rprice','del_date','special_ords','postbake_adj','notes']],
@@ -907,6 +1024,23 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
                col(row,'cost_pound') ? num(row,'cost_pound') : null,
                col(row,'cup_pound') ? num(row,'cup_pound') : null,
                col(row,'notes')]
+            )
+            break
+          }
+          case 'track_tix': {
+            const tacc  = col(row,'account')
+            const tdate = parseAccessDate(col(row,'date') || col(row,'tix_date'))
+            if (!tacc || !tdate) break
+            // Auto-create account stub if needed
+            await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [tacc])
+            await client.query(`
+              INSERT INTO track_tix(tix_date,account,total,paid,last_update)
+              VALUES($1,$2,$3,$4,$5)
+              ON CONFLICT(tix_date,account) DO UPDATE SET
+                total=EXCLUDED.total, paid=EXCLUDED.paid, last_update=EXCLUDED.last_update`,
+              [tdate, tacc,
+               num(row,'total'), num(row,'paid'),
+               parseAccessDate(col(row,'last_update')) || new Date().toISOString().slice(0,10)]
             )
             break
           }

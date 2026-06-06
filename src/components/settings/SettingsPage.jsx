@@ -151,6 +151,85 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
+
+      {/* Background Photo */}
+      <div className="section-card" style={{ marginTop: 16 }}>
+        <div className="card-header"><h2>Background Photo</h2></div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>
+              Image URL
+            </label>
+            <div style={{ display: 'flex', gap: 8 }}>
+              <input className="form-control" style={{ flex: 1 }}
+                placeholder="https://… (paste any image URL)"
+                value={settings.bg_url || ''}
+                onChange={e => setSettings(s => ({ ...s, bg_url: e.target.value }))} />
+              <button className="btn btn-primary btn-sm" onClick={() => saveSetting('bg_url', settings.bg_url || '')}>
+                {saved === 'bg_url' ? '✓ Saved' : 'Save'}
+              </button>
+              {settings.bg_url && (
+                <button className="btn btn-secondary btn-sm" onClick={() => { setSettings(s => ({ ...s, bg_url: '' })); saveSetting('bg_url', '') }}>
+                  Remove
+                </button>
+              )}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              Any public image URL. Tip: use Unsplash or Google Photos shared links.
+            </div>
+          </div>
+
+          {settings.bg_url && (
+            <>
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Fade (opacity) — {Math.round((parseFloat(settings.bg_opacity) || 0.08) * 100)}%
+                </label>
+                <input type="range" min="0" max="0.5" step="0.01"
+                  value={settings.bg_opacity || 0.08}
+                  onChange={e => { setSettings(s => ({ ...s, bg_opacity: e.target.value })); saveSetting('bg_opacity', e.target.value) }}
+                  style={{ width: '100%' }} />
+                <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 11, color: 'var(--text-muted)' }}>
+                  <span>Invisible</span><span>50%</span>
+                </div>
+              </div>
+
+              <div>
+                <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>
+                  Tint
+                </label>
+                <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+                  {[
+                    { label: 'None', value: 'none' },
+                    { label: 'Dark', value: 'rgba(0,0,0,0.3)' },
+                    { label: 'Light', value: 'rgba(255,255,255,0.4)' },
+                    { label: 'Warm', value: 'rgba(180,100,30,0.25)' },
+                    { label: 'Cool', value: 'rgba(30,60,120,0.25)' },
+                    { label: 'Sepia', value: 'rgba(120,80,20,0.3)' },
+                  ].map(t => (
+                    <button key={t.value}
+                      className={`btn btn-sm ${(settings.bg_tint || 'none') === t.value ? 'btn-primary' : 'btn-secondary'}`}
+                      onClick={() => { setSettings(s => ({ ...s, bg_tint: t.value })); saveSetting('bg_tint', t.value) }}>
+                      {t.label}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <div style={{ borderRadius: 8, overflow: 'hidden', height: 80, position: 'relative', border: '1px solid var(--border)' }}>
+                <img src={settings.bg_url} alt="preview" style={{ width: '100%', height: '100%', objectFit: 'cover', opacity: parseFloat(settings.bg_opacity) || 0.08 }} onError={e => e.target.style.display='none'} />
+                {settings.bg_tint && settings.bg_tint !== 'none' && (
+                  <div style={{ position: 'absolute', inset: 0, background: settings.bg_tint }} />
+                )}
+                <span style={{ position: 'absolute', bottom: 4, right: 8, fontSize: 11, color: 'white', textShadow: '0 1px 2px rgba(0,0,0,0.8)' }}>Preview</span>
+              </div>
+            </>
+          )}
+
+        </div>
+      </div>
+
     </div>
   )
 }

@@ -47,6 +47,13 @@ const TABLES = [
     cols: 'prod_name, units, sod_inv, location',
   },
   {
+    key: 'track_tix',
+    label: 'Track Tickets',
+    desc: 'Historical billing and payment records',
+    cols: 'date, account, total, paid',
+    note: 'Import this to load historical payment history from Access',
+  },
+  {
     key: 'daily_orders',
     label: 'Daily Orders',
     desc: 'Historical order data',

@@ -142,6 +142,20 @@ INSERT INTO users (username, password_hash, role)
 VALUES ('admin', '$2a$10$vtOaNw1pAbFHKsKM5jP1cuDUDeUucg3PTPg95StZX1XgcQdyTWJWK', 'admin')
 ON CONFLICT DO NOTHING;
 
+-- ─── Billing / Track Tickets ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS track_tix (
+  id          SERIAL PRIMARY KEY,
+  tix_date    DATE NOT NULL,
+  account     TEXT REFERENCES accounts(name) ON UPDATE CASCADE,
+  total       NUMERIC(10,2) DEFAULT 0,
+  paid        NUMERIC(10,2) DEFAULT 0,
+  notes       TEXT,
+  last_update TIMESTAMPTZ DEFAULT NOW(),
+  UNIQUE(tix_date, account)
+);
+CREATE INDEX IF NOT EXISTS idx_track_tix_date    ON track_tix(tix_date DESC);
+CREATE INDEX IF NOT EXISTS idx_track_tix_account ON track_tix(account);
+
 -- ─── Migrations: extend recipes table ────────────────────────────────────────
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS recipe_id INTEGER;
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS space     BOOLEAN DEFAULT FALSE;

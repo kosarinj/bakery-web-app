@@ -11,17 +11,26 @@ const NAV_ITEMS = [
   { to: '/accounts',  icon: '🏪', label: 'Accounts' },
   { to: '/pricing',   icon: '💲', label: 'Pricing' },
   { to: '/baking',    icon: '🍞', label: 'Bake List' },
+  { to: '/billing',   icon: '🧾', label: 'Billing' },
   { to: '/import',    icon: '⇅',  label: 'Import/Export' },
   { to: '/settings',  icon: '⚙',  label: 'Settings' },
 ]
 
 export default function Layout({ user, setUser }) {
   const [bakeryName, setBakeryName] = useState('Bakery Manager')
+  const [bgUrl, setBgUrl] = useState('')
+  const [bgOpacity, setBgOpacity] = useState(0.08)
+  const [bgTint, setBgTint] = useState('none')
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
-      .then(s => { if (s.bakery_name) setBakeryName(s.bakery_name) })
+      .then(s => {
+        if (s.bakery_name) setBakeryName(s.bakery_name)
+        if (s.bg_url) setBgUrl(s.bg_url)
+        if (s.bg_opacity) setBgOpacity(parseFloat(s.bg_opacity))
+        if (s.bg_tint) setBgTint(s.bg_tint)
+      })
       .catch(() => {})
   }, [])
 
@@ -32,6 +41,19 @@ export default function Layout({ user, setUser }) {
 
   return (
     <>
+      {bgUrl && (
+        <>
+          <div style={{
+            position: 'fixed', inset: 0, zIndex: -1,
+            backgroundImage: `url(${bgUrl})`,
+            backgroundSize: 'cover', backgroundPosition: 'center',
+            opacity: bgOpacity,
+          }} />
+          {bgTint && bgTint !== 'none' && (
+            <div style={{ position: 'fixed', inset: 0, zIndex: -1, background: bgTint }} />
+          )}
+        </>
+      )}
       <header className="app-header">
         <div className="brand">{bakeryName}</div>
         <div className="header-right">
