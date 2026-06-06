@@ -18,20 +18,29 @@ const NAV_ITEMS = [
 
 export default function Layout({ user, setUser }) {
   const [bakeryName, setBakeryName] = useState('Bakery Manager')
-  const [bgUrl, setBgUrl] = useState('')
-  const [bgOpacity, setBgOpacity] = useState(0.08)
-  const [bgTint, setBgTint] = useState('none')
+  const [bgUrl, setBgUrl] = useState(() => localStorage.getItem('bakery-bg_url') || '')
+  const [bgOpacity, setBgOpacity] = useState(() => parseFloat(localStorage.getItem('bakery-bg_opacity')) || 0.08)
+  const [bgTint, setBgTint] = useState(() => localStorage.getItem('bakery-bg_tint') || 'none')
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
       .then(s => {
         if (s.bakery_name) setBakeryName(s.bakery_name)
-        if (s.bg_url) setBgUrl(s.bg_url)
-        if (s.bg_opacity) setBgOpacity(parseFloat(s.bg_opacity))
-        if (s.bg_tint) setBgTint(s.bg_tint)
+        if (s.bg_url)      { setBgUrl(s.bg_url);                         localStorage.setItem('bakery-bg_url', s.bg_url) }
+        if (s.bg_opacity)  { setBgOpacity(parseFloat(s.bg_opacity));     localStorage.setItem('bakery-bg_opacity', s.bg_opacity) }
+        if (s.bg_tint)     { setBgTint(s.bg_tint);                       localStorage.setItem('bakery-bg_tint', s.bg_tint) }
       })
       .catch(() => {})
+
+    // Live-update when settings page saves a new background
+    function onBgChanged() {
+      setBgUrl(localStorage.getItem('bakery-bg_url') || '')
+      setBgOpacity(parseFloat(localStorage.getItem('bakery-bg_opacity')) || 0.08)
+      setBgTint(localStorage.getItem('bakery-bg_tint') || 'none')
+    }
+    window.addEventListener('bakery-bg-changed', onBgChanged)
+    return () => window.removeEventListener('bakery-bg-changed', onBgChanged)
   }, [])
 
   async function logout() {

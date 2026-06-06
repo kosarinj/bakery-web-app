@@ -61,6 +61,11 @@ export default function SettingsPage() {
       setSettings(s => ({ ...s, [key]: value }))
       setSaved(key)
       setTimeout(() => setSaved(''), 2000)
+      // Mirror bg settings to localStorage so Layout picks them up immediately
+      if (['bg_url','bg_opacity','bg_tint'].includes(key)) {
+        localStorage.setItem(`bakery-${key}`, value ?? '')
+        window.dispatchEvent(new Event('bakery-bg-changed'))
+      }
     } catch (e) {
       setError(`Save failed: ${e.message}`)
     }
