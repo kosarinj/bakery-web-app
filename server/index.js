@@ -756,6 +756,7 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
 
     for (const row of norm) {
       try {
+        await client.query('SAVEPOINT row_sp')
         switch (req.params.table) {
           case 'products': {
             // Access uses 'divide_by' for divisor, 'inactive' (inverted) for active, 'prod_ID' for prod_id
@@ -937,10 +938,11 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             if (!rprod) break
             const ringr = col(row,'ingredient') || null  // NULL for text-only lines
             const rrid  = col(row,'recipe_id') ?? col(row,'record')
+            // Always ensure product exists (FK needed even for text-only lines)
+            await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [rprod])
+            await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [rprod])
             if (ringr) {
               await client.query(`INSERT INTO ingredients(name) VALUES($1) ON CONFLICT DO NOTHING`, [ringr])
-              await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [rprod])
-              await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [rprod])
             }
             await client.query(
               `INSERT INTO recipes(recipe_id,product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rec_group,space,rectext,last_update)
@@ -972,6 +974,7 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
         }
         count++
       } catch (e) {
+        await client.query('ROLLBACK TO SAVEPOINT row_sp').catch(() => {})
         errors.push({ error: e.message, row })
       }
     }
