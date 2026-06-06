@@ -314,9 +314,18 @@ export default function OrdersGrid() {
           onClick={() => setFlipped(v => !v)} title="Swap rows and columns">
           ⇄ Flip
         </button>
-        <button className={`btn btn-sm ${filtersActive ? 'btn-primary' : 'btn-secondary'}`}
+        <label style={{ gap: 6 }}>
+          Type:
+          <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)}
+            style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, background: filterProductType ? 'var(--primary-light)' : 'var(--surface)' }}>
+            <option value="">All types</option>
+            {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+          </select>
+        </label>
+
+        <button className={`btn btn-sm ${(filterProduct || filterAccount) ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setShowFilters(v => !v)}>
-          🔍 Filter{filtersActive ? ' ●' : ''}
+          🔍{(filterProduct || filterAccount) ? ' ●' : ''}
         </button>
 
         <span className="toolbar-info">
@@ -324,7 +333,7 @@ export default function OrdersGrid() {
         </span>
       </div>
 
-      {/* ── Filter row ── */}
+      {/* ── Filter row (product name + account search) ── */}
       {showFilters && (
         <div className="page-toolbar" style={{ marginBottom: 6, background: 'var(--border-light)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
           <label>
@@ -333,13 +342,8 @@ export default function OrdersGrid() {
               onChange={e => setFilterProduct(e.target.value)}
               style={{ width: 140 }} />
           </label>
-          <label>
-            Type:
-            <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)}
-              style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13 }}>
-              <option value="">— all types —</option>
-              {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
-            </select>
+          <label style={{ display: 'none' }}>
+            Type: (moved to main toolbar)
           </label>
           <label>
             Account:
@@ -348,7 +352,7 @@ export default function OrdersGrid() {
               style={{ width: 140 }} />
           </label>
           <button className="btn btn-secondary btn-sm"
-            onClick={() => { setFilterProduct(''); setFilterProductType(''); setFilterAccount('') }}>
+            onClick={() => { setFilterProduct(''); setFilterAccount('') }}>
             Clear
           </button>
         </div>
