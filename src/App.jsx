@@ -12,6 +12,7 @@ import BakeSchedule from './components/baking/BakeSchedule'
 import ImportExport from './components/import-export/ImportExport'
 import Dashboard from './components/Dashboard'
 import ErrorBoundary from './components/shared/ErrorBoundary'
+import SettingsPage from './components/settings/SettingsPage'
 
 function Guarded({ children }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
@@ -53,6 +54,7 @@ export default function App() {
           <Route path="pricing"    element={<Guarded><PriceGrid /></Guarded>} />
           <Route path="baking"     element={<Guarded><BakeSchedule /></Guarded>} />
           <Route path="import"     element={<Guarded><ImportExport /></Guarded>} />
+          <Route path="settings"   element={<Guarded><SettingsPage /></Guarded>} />
         </Route>
       </Routes>
     </BrowserRouter>

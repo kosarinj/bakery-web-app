@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { to: '/pricing',   icon: '💲', label: 'Pricing' },
   { to: '/baking',    icon: '🍞', label: 'Bake List' },
   { to: '/import',    icon: '⇅',  label: 'Import/Export' },
+  { to: '/settings',  icon: '⚙',  label: 'Settings' },
 ]
 
 export default function Layout({ user, setUser }) {
