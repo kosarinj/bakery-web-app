@@ -214,9 +214,10 @@ export default function OrdersGrid() {
   const visibleAccounts = useMemo(() => {
     let a = Array.isArray(accounts) ? accounts : []
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
+    if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
     if (hideEmptyRows) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
     return a
-  }, [accounts, filterAccount, hideEmptyRows, visibleProducts, orderMap])
+  }, [accounts, filterAccount, repeatAccounts, hideEmptyRows, visibleProducts, orderMap])
 
   // Totals
   const rowTotal = useCallback((key1) =>
@@ -352,8 +353,8 @@ export default function OrdersGrid() {
             }
             setShowRepeatAccounts(v => !v)
           }}
-          title="Choose which accounts to include in repeat">
-          👥 Accounts{repeatAccounts ? ` (${repeatAccounts.size})` : ''}
+          title="Filter grid and repeat orders to selected accounts">
+          👥 {repeatAccounts ? `${repeatAccounts.size} accounts` : 'Filter Accounts'}
         </button>
         {copyMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>}
       </div>
@@ -365,14 +366,22 @@ export default function OrdersGrid() {
           border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
           maxHeight: 200, overflowY: 'auto'
         }}>
-          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+          <div style={{ display: 'flex', gap: 6, marginBottom: 8, flexWrap: 'wrap' }}>
             <button className="btn btn-secondary btn-sm"
               onClick={() => setRepeatAccounts(new Set(accounts.map(a => a.name)))}>All</button>
             <button className="btn btn-secondary btn-sm"
               onClick={() => setRepeatAccounts(new Set())}>None</button>
+            <button className="btn btn-primary btn-sm"
+              onClick={() => setRepeatAccounts(new Set(
+                accounts
+                  .filter(a => products.some(p => (orderMap[`${a.name}|${p.prod_name}`]?.units || 0) > 0))
+                  .map(a => a.name)
+              ))}>
+              ✓ Accounts with Orders
+            </button>
             <button className="btn btn-secondary btn-sm"
               onClick={() => { setRepeatAccounts(null); setShowRepeatAccounts(false) }}>
-              Reset (all accounts)
+              Clear filter
             </button>
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
