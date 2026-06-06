@@ -22,18 +22,38 @@ export default pool
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const schema = readFileSync(join(__dirname, '../db/schema.sql'), 'utf8')
 
-// Only run schema if the database hasn't been fully migrated yet.
-// Check for the last column added (adj_level on accounts).
-// On an already-running DB this query returns instantly and skips the migration.
-pool.query(`SELECT 1 FROM information_schema.columns
-  WHERE table_name='accounts' AND column_name='adj_level' LIMIT 1`)
-  .then(({ rows }) => {
-    if (rows.length > 0) {
-      console.log('Database ready')
-      return
-    }
-    console.log('Running schema initialization...')
-    return pool.query(schema)
-  })
-  .then(() => console.log('Schema OK'))
-  .catch(err => console.error('DB init error:', err.message))
+async function initDB() {
+  // Check whether latest migration column exists
+  const { rows: recipeCheck } = await pool.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_name='recipes' AND column_name='recipe_id' LIMIT 1`
+  )
+  if (recipeCheck.length > 0) {
+    console.log('Database ready')
+    return
+  }
+
+  // Check whether base schema exists at all
+  const { rows: baseCheck } = await pool.query(
+    `SELECT 1 FROM information_schema.columns
+     WHERE table_name='accounts' AND column_name='adj_level' LIMIT 1`
+  )
+
+  if (baseCheck.length === 0) {
+    // Fresh database — run full schema
+    await pool.query(schema)
+    console.log('Database initialized')
+  } else {
+    // Existing DB — run only the new recipe migrations
+    await pool.query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS recipe_id INTEGER`)
+    await pool.query(`ALTER TABLE recipes ADD COLUMN IF NOT EXISTS space     BOOLEAN DEFAULT FALSE`)
+    await pool.query(`ALTER TABLE recipes DROP CONSTRAINT IF EXISTS recipes_product_ingredient_key`)
+    await pool.query(
+      `CREATE UNIQUE INDEX IF NOT EXISTS idx_recipes_product_ingredient
+       ON recipes(product, ingredient) WHERE ingredient IS NOT NULL`
+    )
+    console.log('Database migrations applied (recipe_id, space, partial index)')
+  }
+}
+
+initDB().catch(err => console.error('DB init error:', err.message))
