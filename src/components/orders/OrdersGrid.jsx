@@ -7,6 +7,12 @@ function prevDay(dateStr) {
   return d.toISOString().slice(0, 10)
 }
 
+function addDays(dateStr, n) {
+  const d = new Date(dateStr + 'T00:00:00')
+  d.setDate(d.getDate() + n)
+  return d.toISOString().slice(0, 10)
+}
+
 function MiniCalendar({ value, activeDates, onChange, onMonthChange, onClose }) {
   const [month, setMonth] = useState(value ? value.slice(0, 7) : new Date().toISOString().slice(0, 7))
   const ref = useRef(null)
@@ -107,11 +113,13 @@ export default function OrdersGrid() {
       .then(r => r.json())
       .then(s => {
         const d = s.baking_date || new Date().toISOString().slice(0, 10)
-        setDate(d); setCopyFrom(prevDay(d)); setCopyTo(d); setCalMonth(d.slice(0, 7))
+        const from = prevDay(d)
+        setDate(d); setCopyFrom(from); setCopyTo(addDays(from, 7)); setCalMonth(d.slice(0, 7))
       })
       .catch(() => {
         const d = new Date().toISOString().slice(0, 10)
-        setDate(d); setCopyFrom(prevDay(d)); setCopyTo(d); setCalMonth(d.slice(0, 7))
+        const from = prevDay(d)
+        setDate(d); setCopyFrom(from); setCopyTo(addDays(from, 7)); setCalMonth(d.slice(0, 7))
       })
   }, [])
 
@@ -275,7 +283,7 @@ export default function OrdersGrid() {
           </button>
           {calOpen && (
             <MiniCalendar value={date} activeDates={activeDates}
-              onChange={d => { setDate(d); setCopyFrom(prevDay(d)); setCopyTo(d) }}
+              onChange={d => { setDate(d); const f = prevDay(d); setCopyFrom(f); setCopyTo(addDays(f, 7)) }}
               onMonthChange={m => setCalMonth(m)}
               onClose={() => setCalOpen(false)} />
           )}
@@ -336,7 +344,7 @@ export default function OrdersGrid() {
       {/* ── Copy / Repeat row ── */}
       <div className="page-toolbar" style={{ marginBottom: 12 }}>
         <label>From:
-          <input type="date" value={copyFrom} onChange={e => setCopyFrom(e.target.value)} />
+          <input type="date" value={copyFrom} onChange={e => { setCopyFrom(e.target.value); setCopyTo(addDays(e.target.value, 7)) }} />
         </label>
         <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>→</span>
         <label>To:
