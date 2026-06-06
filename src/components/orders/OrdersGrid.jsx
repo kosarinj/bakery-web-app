@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
 
 function prevDay(dateStr) {
@@ -56,13 +56,10 @@ function MiniCalendar({ value, activeDates, onChange, onMonthChange, onClose }) 
           const isToday    = cell.ds === today
           const hasOrders  = activeDates.has(cell.ds)
           return (
-            <div
-              key={i}
+            <div key={i}
               className={`cal-day${hasOrders ? ' cal-has-orders' : ''}${isSelected ? ' cal-selected' : ''}${isToday ? ' cal-today' : ''}`}
               onClick={() => { onChange(cell.ds); onClose() }}
-            >
-              {cell.d}
-            </div>
+            >{cell.d}</div>
           )
         })}
       </div>
@@ -77,31 +74,48 @@ export default function OrdersGrid() {
   const [orderMap, setOrderMap] = useState({})
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
-  const [copyFrom, setCopyFrom] = useState('')
-  const [copying, setCopying] = useState(false)
-  const [copyMsg, setCopyMsg] = useState('')
+
+  // Calendar
   const [calOpen, setCalOpen] = useState(false)
   const [calMonth, setCalMonth] = useState('')
   const [activeDates, setActiveDates] = useState(new Set())
+
+  // Layout toggles
   const [hideEmptyRows, setHideEmptyRows] = useState(true)
   const [hideEmptyCols, setHideEmptyCols] = useState(true)
+  const [flipped, setFlipped] = useState(false)
+
+  // Filters
+  const [filterProduct, setFilterProduct] = useState('')
+  const [filterProductType, setFilterProductType] = useState('')
+  const [filterAccount, setFilterAccount] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+
+  // Copy / Repeat
+  const [copyFrom, setCopyFrom] = useState('')
+  const [copyTo, setCopyTo] = useState('')
+  const [copying, setCopying] = useState(false)
+  const [copyMsg, setCopyMsg] = useState('')
+  const [showRepeatAccounts, setShowRepeatAccounts] = useState(false)
+  const [repeatAccounts, setRepeatAccounts] = useState(null) // null = all
+
   const orderMapRef = useRef({})
 
+  // Load settings
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
       .then(s => {
         const d = s.baking_date || new Date().toISOString().slice(0, 10)
-        setDate(d)
-        setCopyFrom(prevDay(d))
-        setCalMonth(d.slice(0, 7))
+        setDate(d); setCopyFrom(prevDay(d)); setCopyTo(d); setCalMonth(d.slice(0, 7))
       })
       .catch(() => {
         const d = new Date().toISOString().slice(0, 10)
-        setDate(d); setCopyFrom(prevDay(d)); setCalMonth(d.slice(0, 7))
+        setDate(d); setCopyFrom(prevDay(d)); setCopyTo(d); setCalMonth(d.slice(0, 7))
       })
   }, [])
 
+  // Load active dates for calendar
   useEffect(() => {
     if (!calMonth) return
     fetch(`/api/orders/active-dates?month=${calMonth}`, { credentials: 'include' })
@@ -110,23 +124,22 @@ export default function OrdersGrid() {
       .catch(() => {})
   }, [calMonth])
 
+  // Load orders when date changes
   useEffect(() => {
     if (!date) return
     if (date.slice(0, 7) !== calMonth) setCalMonth(date.slice(0, 7))
     setLoading(true); setError('')
     const get = url => fetch(url, { credentials: 'include' })
       .then(r => r.json().then(d => { if (!r.ok) throw new Error(`${r.status}: ${d?.error || r.statusText}`); return d }))
-
     Promise.all([
       get('/api/accounts'),
       get('/api/products'),
       get(`/api/orders?date=${date}`),
     ])
       .then(([accts, prods, orders]) => {
-        if (!Array.isArray(accts)) { setError(`Accounts load failed: ${accts?.error || 'unexpected response'}`); setLoading(false); return }
-        if (!Array.isArray(prods)) { setError(`Products load failed: ${prods?.error || 'unexpected response'}`); setLoading(false); return }
-        setAccounts(accts)
-        setProducts(prods)
+        if (!Array.isArray(accts)) { setError(`Accounts: ${accts?.error || 'load failed'}`); setLoading(false); return }
+        if (!Array.isArray(prods)) { setError(`Products: ${prods?.error || 'load failed'}`); setLoading(false); return }
+        setAccounts(accts); setProducts(prods)
         const map = {}
         ;(Array.isArray(orders) ? orders : []).forEach(o => {
           map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
@@ -160,98 +173,224 @@ export default function OrdersGrid() {
   }, [])
 
   async function copyOrders() {
-    if (!copyFrom || !date) return
+    if (!copyFrom || !copyTo) return
     setCopying(true); setCopyMsg(''); setError('')
+    const accountsList = repeatAccounts ? [...repeatAccounts] : null
     try {
       const r = await fetch('/api/orders/copy', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ from_date: copyFrom, to_date: date })
+        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, ...(accountsList ? { accounts: accountsList } : {}) })
       })
       const data = await r.json()
       if (!r.ok) throw new Error(data.error)
-      const updated = { ...orderMapRef.current }
-      ;(Array.isArray(data.rows) ? data.rows : []).forEach(o => {
-        updated[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
-      })
-      orderMapRef.current = updated; setOrderMap(updated)
-      setCopyMsg(`Copied ${data.copied} order${data.copied !== 1 ? 's' : ''} from ${copyFrom}`)
-      setTimeout(() => setCopyMsg(''), 4000)
+      // If copied to current date, merge into orderMap
+      if (copyTo === date) {
+        const updated = { ...orderMapRef.current }
+        ;(Array.isArray(data.rows) ? data.rows : []).forEach(o => {
+          updated[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
+        })
+        orderMapRef.current = updated; setOrderMap(updated)
+      }
+      const acctNote = accountsList ? ` (${accountsList.length} accounts)` : ''
+      setCopyMsg(`Copied ${data.copied} order${data.copied !== 1 ? 's' : ''} from ${copyFrom} → ${copyTo}${acctNote}`)
+      setTimeout(() => setCopyMsg(''), 5000)
     } catch (e) { setError(`Copy failed: ${e.message}`) }
     finally { setCopying(false) }
   }
 
-  const visibleProducts = hideEmptyCols
-    ? products.filter(p => accounts.some(a => (orderMap[`${a.name}|${p.prod_name}`]?.units || 0) > 0))
-    : products
+  // Derived lists
+  const productTypes = useMemo(() =>
+    [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
+  , [products])
 
-  const visibleAccounts = hideEmptyRows
-    ? accounts.filter(a => visibleProducts.some(p => (orderMap[`${a.name}|${p.prod_name}`]?.units || 0) > 0))
-    : accounts
+  const visibleProducts = useMemo(() => {
+    let p = Array.isArray(products) ? products : []
+    if (filterProductType) p = p.filter(x => x.prod_type === filterProductType)
+    if (filterProduct) p = p.filter(x => (x.prod_name||'').toLowerCase().includes(filterProduct.toLowerCase()))
+    if (hideEmptyCols) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
+    return p
+  }, [products, filterProductType, filterProduct, hideEmptyCols, accounts, orderMap])
 
-  const colTotal = p => visibleAccounts.reduce((s, a) => s + (orderMapRef.current[`${a.name}|${p.prod_name}`]?.units || 0), 0)
-  const grandTotal = visibleAccounts.reduce((s, a) =>
-    s + visibleProducts.reduce((ss, p) => ss + (orderMap[`${a.name}|${p.prod_name}`]?.units || 0), 0), 0)
+  const visibleAccounts = useMemo(() => {
+    let a = Array.isArray(accounts) ? accounts : []
+    if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
+    if (hideEmptyRows) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
+    return a
+  }, [accounts, filterAccount, hideEmptyRows, visibleProducts, orderMap])
+
+  // Totals
+  const rowTotal = useCallback((key1) =>
+    (flipped ? visibleAccounts : visibleProducts).reduce((s, key2) => {
+      const [acct, prod] = flipped ? [key2.name, key1.prod_name] : [key1.name, key2.prod_name]
+      return s + (orderMap[`${acct}|${prod}`]?.units || 0)
+    }, 0)
+  , [flipped, visibleAccounts, visibleProducts, orderMap])
+
+  const colTotal = useCallback((key2) =>
+    (flipped ? visibleProducts : visibleAccounts).reduce((s, key1) => {
+      const [acct, prod] = flipped ? [key2.name, key1.prod_name] : [key1.name, key2.prod_name]
+      return s + (orderMap[`${acct}|${prod}`]?.units || 0)
+    }, 0)
+  , [flipped, visibleAccounts, visibleProducts, orderMap])
+
+  const grandTotal = useMemo(() =>
+    visibleAccounts.reduce((s, a) =>
+      s + visibleProducts.reduce((ss, p) => ss + (orderMap[`${a.name}|${p.prod_name}`]?.units || 0), 0)
+    , 0)
+  , [visibleAccounts, visibleProducts, orderMap])
 
   if (loading) return <div className="loading">Loading orders...</div>
+
+  const rows    = flipped ? visibleProducts : visibleAccounts
+  const cols    = flipped ? visibleAccounts : visibleProducts
+  const rowKey  = r => flipped ? r.prod_name : r.name
+  const colKey  = c => flipped ? c.name : c.prod_name
+  const rowLabel = r => flipped ? r.prod_name : r.name
+  const colLabel = c => flipped ? c.name : c.prod_name
+  const cellVal  = (r, c) => {
+    const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
+    return orderMap[`${acct}|${prod}`]?.units ?? 0
+  }
+  const onSave = (r, c) => v => {
+    const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
+    saveCell(acct, prod, v, date)
+  }
 
   const dateDisplay = date
     ? new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     : '—'
 
+  const filtersActive = !!(filterProduct || filterProductType || filterAccount)
+
   return (
     <div>
-      <div className="page-toolbar">
-        {/* Date picker with mini calendar */}
+      {/* ── Toolbar row 1 ── */}
+      <div className="page-toolbar" style={{ marginBottom: 6 }}>
         <div style={{ position: 'relative' }}>
-          <button
-            className="btn btn-secondary btn-sm"
+          <button className="btn btn-secondary btn-sm"
             style={{ fontWeight: 600, minWidth: 170, justifyContent: 'flex-start' }}
-            onClick={() => setCalOpen(o => !o)}
-          >
+            onClick={() => setCalOpen(o => !o)}>
             📅 {dateDisplay}
           </button>
           {calOpen && (
-            <MiniCalendar
-              value={date}
-              activeDates={activeDates}
-              onChange={d => { setDate(d); setCopyFrom(prevDay(d)) }}
+            <MiniCalendar value={date} activeDates={activeDates}
+              onChange={d => { setDate(d); setCopyFrom(prevDay(d)); setCopyTo(d) }}
               onMonthChange={m => setCalMonth(m)}
-              onClose={() => setCalOpen(false)}
-            />
+              onClose={() => setCalOpen(false)} />
           )}
         </div>
 
-        {/* Row / col filters */}
-        <button
-          className={`btn btn-sm ${hideEmptyRows ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setHideEmptyRows(v => !v)}
-          title="Hide accounts with no orders on this date"
-        >
+        <button className={`btn btn-sm ${hideEmptyRows ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setHideEmptyRows(v => !v)} title="Hide rows with no orders">
           {hideEmptyRows ? '▣' : '▢'} Rows
         </button>
-        <button
-          className={`btn btn-sm ${hideEmptyCols ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setHideEmptyCols(v => !v)}
-          title="Hide products with no orders on this date"
-        >
+        <button className={`btn btn-sm ${hideEmptyCols ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setHideEmptyCols(v => !v)} title="Hide columns with no orders">
           {hideEmptyCols ? '▣' : '▢'} Cols
+        </button>
+        <button className={`btn btn-sm ${flipped ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setFlipped(v => !v)} title="Swap rows and columns">
+          ⇄ Flip
+        </button>
+        <button className={`btn btn-sm ${filtersActive ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setShowFilters(v => !v)}>
+          🔍 Filter{filtersActive ? ' ●' : ''}
         </button>
 
         <span className="toolbar-info">
-          {visibleAccounts.length} accounts · {visibleProducts.length} products
+          {visibleAccounts.length} accts · {visibleProducts.length} prods
         </span>
-        <div className="toolbar-spacer" />
+      </div>
 
-        <label>
-          Copy from:
+      {/* ── Filter row ── */}
+      {showFilters && (
+        <div className="page-toolbar" style={{ marginBottom: 6, background: 'var(--border-light)', padding: '8px 10px', borderRadius: 'var(--radius-sm)' }}>
+          <label>
+            Product:
+            <input type="text" placeholder="search…" value={filterProduct}
+              onChange={e => setFilterProduct(e.target.value)}
+              style={{ width: 140 }} />
+          </label>
+          <label>
+            Type:
+            <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)}
+              style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13 }}>
+              <option value="">— all types —</option>
+              {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+            </select>
+          </label>
+          <label>
+            Account:
+            <input type="text" placeholder="search…" value={filterAccount}
+              onChange={e => setFilterAccount(e.target.value)}
+              style={{ width: 140 }} />
+          </label>
+          <button className="btn btn-secondary btn-sm"
+            onClick={() => { setFilterProduct(''); setFilterProductType(''); setFilterAccount('') }}>
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* ── Copy / Repeat row ── */}
+      <div className="page-toolbar" style={{ marginBottom: 12 }}>
+        <label>From:
           <input type="date" value={copyFrom} onChange={e => setCopyFrom(e.target.value)} />
         </label>
-        <button className="btn btn-secondary btn-sm" onClick={copyOrders}
-          disabled={copying || !copyFrom || copyFrom === date}>
+        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>→</span>
+        <label>To:
+          <input type="date" value={copyTo} onChange={e => setCopyTo(e.target.value)} />
+        </label>
+        <button className="btn btn-secondary btn-sm"
+          onClick={copyOrders} disabled={copying || !copyFrom || !copyTo || copyFrom === copyTo}>
           {copying ? 'Copying…' : '⬇ Repeat Orders'}
+        </button>
+        <button className={`btn btn-sm ${showRepeatAccounts ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => {
+            if (!showRepeatAccounts && repeatAccounts === null) {
+              setRepeatAccounts(new Set(accounts.map(a => a.name)))
+            }
+            setShowRepeatAccounts(v => !v)
+          }}
+          title="Choose which accounts to include in repeat">
+          👥 Accounts{repeatAccounts ? ` (${repeatAccounts.size})` : ''}
         </button>
         {copyMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>}
       </div>
+
+      {/* ── Account selector for repeat ── */}
+      {showRepeatAccounts && repeatAccounts && (
+        <div style={{
+          marginBottom: 12, padding: '10px 12px', background: 'var(--surface)',
+          border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+          maxHeight: 200, overflowY: 'auto'
+        }}>
+          <div style={{ display: 'flex', gap: 8, marginBottom: 8 }}>
+            <button className="btn btn-secondary btn-sm"
+              onClick={() => setRepeatAccounts(new Set(accounts.map(a => a.name)))}>All</button>
+            <button className="btn btn-secondary btn-sm"
+              onClick={() => setRepeatAccounts(new Set())}>None</button>
+            <button className="btn btn-secondary btn-sm"
+              onClick={() => { setRepeatAccounts(null); setShowRepeatAccounts(false) }}>
+              Reset (all accounts)
+            </button>
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
+            {accounts.map(a => (
+              <label key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', minWidth: 160 }}>
+                <input type="checkbox"
+                  checked={repeatAccounts.has(a.name)}
+                  onChange={e => {
+                    const next = new Set(repeatAccounts)
+                    e.target.checked ? next.add(a.name) : next.delete(a.name)
+                    setRepeatAccounts(next)
+                  }} />
+                {a.name}
+              </label>
+            ))}
+          </div>
+        </div>
+      )}
 
       {error && <div className="error-message">{error}</div>}
       {accounts.length === 0 && <div className="empty-state">No accounts found. Add accounts in the Accounts tab first.</div>}
@@ -262,42 +401,42 @@ export default function OrdersGrid() {
           <table className="data-grid">
             <thead>
               <tr>
-                <th className="sticky-col" style={{ minWidth: 130 }}>Account</th>
-                {visibleProducts.map(p => (
-                  <th key={p.prod_name} title={p.prod_group || ''} style={{ textAlign: 'right', minWidth: 60 }}>
-                    {p.prod_name}
+                <th className="sticky-col" style={{ minWidth: 130 }}>
+                  {flipped ? 'Product' : 'Account'}
+                </th>
+                {cols.map(c => (
+                  <th key={colKey(c)} title={flipped ? (c.route||'') : (c.prod_group||'')}
+                    style={{ textAlign: 'right', minWidth: 60 }}>
+                    {colLabel(c)}
                   </th>
                 ))}
                 <th style={{ textAlign: 'right', minWidth: 60 }}>Total</th>
               </tr>
             </thead>
             <tbody>
-              {visibleAccounts.map(acc => {
-                const rowTotal = visibleProducts.reduce(
-                  (sum, p) => sum + (orderMap[`${acc.name}|${p.prod_name}`]?.units || 0), 0)
+              {rows.map(r => {
+                const rt = (flipped ? visibleAccounts : visibleProducts).reduce((s, c) => {
+                  const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
+                  return s + (orderMap[`${acct}|${prod}`]?.units || 0)
+                }, 0)
                 return (
-                  <tr key={acc.name}>
-                    <td className="sticky-col acct-name" title={acc.route || ''}>{acc.name}</td>
-                    {visibleProducts.map(p => {
-                      const key = `${acc.name}|${p.prod_name}`
-                      const val = orderMap[key]?.units ?? 0
+                  <tr key={rowKey(r)}>
+                    <td className="sticky-col acct-name">{rowLabel(r)}</td>
+                    {cols.map(c => {
+                      const val = cellVal(r, c)
                       return (
-                        <td key={p.prod_name} className={`order-cell${val > 0 ? ' order-cell-filled' : ''}`}>
-                          <EditableCell
-                            value={val}
-                            onSave={v => saveCell(acc.name, p.prod_name, v, date)}
-                            type="number" align="right"
-                          />
+                        <td key={colKey(c)} className={`order-cell${val > 0 ? ' order-cell-filled' : ''}`}>
+                          <EditableCell value={val} onSave={onSave(r, c)} type="number" align="right" />
                         </td>
                       )
                     })}
-                    <td className="total-cell">{rowTotal || ''}</td>
+                    <td className="total-cell">{rt || ''}</td>
                   </tr>
                 )
               })}
               <tr className="totals-row">
                 <td className="sticky-col">Total</td>
-                {visibleProducts.map(p => <td key={p.prod_name} className="total-cell">{colTotal(p) || ''}</td>)}
+                {cols.map(c => <td key={colKey(c)} className="total-cell">{colTotal(c) || ''}</td>)}
                 <td className="total-cell">{grandTotal || ''}</td>
               </tr>
             </tbody>
