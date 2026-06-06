@@ -60,10 +60,13 @@ function MiniCalendar({ value, activeDates, onChange, onMonthChange, onClose }) 
           if (!cell) return <div key={i} className="cal-blank" />
           const isSelected = cell.ds === value
           const isToday    = cell.ds === today
-          const hasOrders  = activeDates.has(cell.ds)
+          const info       = activeDates.get(cell.ds)
+          const hasOrders  = !!info
+          const tip = info ? `${info.account_count} account${info.account_count !== '1' ? 's' : ''} · ${info.order_count} lines` : undefined
           return (
             <div key={i}
               className={`cal-day${hasOrders ? ' cal-has-orders' : ''}${isSelected ? ' cal-selected' : ''}${isToday ? ' cal-today' : ''}`}
+              data-tooltip={tip}
               onClick={() => { onChange(cell.ds); onClose() }}
             >{cell.d}</div>
           )
@@ -84,7 +87,7 @@ export default function OrdersGrid() {
   // Calendar
   const [calOpen, setCalOpen] = useState(false)
   const [calMonth, setCalMonth] = useState('')
-  const [activeDates, setActiveDates] = useState(new Set())
+  const [activeDates, setActiveDates] = useState(new Map())
 
   // Layout toggles
   const [hideEmptyRows, setHideEmptyRows] = useState(true)
@@ -128,7 +131,11 @@ export default function OrdersGrid() {
     if (!calMonth) return
     fetch(`/api/orders/active-dates?month=${calMonth}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(dates => setActiveDates(new Set(Array.isArray(dates) ? dates : [])))
+      .then(rows => {
+        const m = new Map()
+        ;(Array.isArray(rows) ? rows : []).forEach(r => m.set(r.date, r))
+        setActiveDates(m)
+      })
       .catch(() => {})
   }, [calMonth])
 
@@ -280,6 +287,12 @@ export default function OrdersGrid() {
             style={{ fontWeight: 600, minWidth: 170, justifyContent: 'flex-start' }}
             onClick={() => setCalOpen(o => !o)}>
             📅 {dateDisplay}
+            {activeDates.size > 0 && (
+              <span style={{ marginLeft: 6, fontSize: 10, background: 'var(--accent)', color: 'white', borderRadius: 10, padding: '1px 5px' }}
+                title={`${activeDates.size} days with orders this month`}>
+                {activeDates.size}
+              </span>
+            )}
           </button>
           {calOpen && (
             <MiniCalendar value={date} activeDates={activeDates}

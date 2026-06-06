@@ -370,12 +370,15 @@ app.get('/api/orders/active-dates', requireAuth, async (req, res) => {
   const { month } = req.query
   if (!month) return res.json([])
   const { rows } = await query(
-    `SELECT DISTINCT ordr_dt::text AS date FROM daily_orders
+    `SELECT ordr_dt::text AS date,
+            COUNT(DISTINCT account) AS account_count,
+            COUNT(*) AS order_count
+     FROM daily_orders
      WHERE ordr_dt >= $1::date AND ordr_dt < ($1::date + INTERVAL '1 month')
-     ORDER BY ordr_dt`,
+     GROUP BY ordr_dt ORDER BY ordr_dt`,
     [month + '-01']
   )
-  res.json(rows.map(r => r.date))
+  res.json(rows)
 })
 
 app.get('/api/orders/summary', requireAuth, async (req, res) => {
