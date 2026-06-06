@@ -6,6 +6,7 @@ import OrdersGrid from './components/orders/OrdersGrid'
 import InventoryGrid from './components/inventory/InventoryGrid'
 import ProductsList from './components/products/ProductsList'
 import RecipeGrid from './components/recipes/RecipeGrid'
+import RecipeGenerator from './components/recipes/RecipeGenerator'
 import AccountsList from './components/accounts/AccountsList'
 import PriceGrid from './components/pricing/PriceGrid'
 import BakeSchedule from './components/baking/BakeSchedule'
@@ -50,6 +51,7 @@ export default function App() {
           <Route path="inventory"  element={<Guarded><InventoryGrid /></Guarded>} />
           <Route path="products"   element={<Guarded><ProductsList /></Guarded>} />
           <Route path="recipes"    element={<Guarded><RecipeGrid /></Guarded>} />
+          <Route path="recipe-gen" element={<Guarded><RecipeGenerator /></Guarded>} />
           <Route path="accounts"   element={<Guarded><AccountsList /></Guarded>} />
           <Route path="pricing"    element={<Guarded><PriceGrid /></Guarded>} />
           <Route path="baking"     element={<Guarded><BakeSchedule /></Guarded>} />

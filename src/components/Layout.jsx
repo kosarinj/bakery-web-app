@@ -7,6 +7,7 @@ const NAV_ITEMS = [
   { to: '/inventory', icon: '📦', label: 'Inventory' },
   { to: '/products',  icon: '🥐', label: 'Products' },
   { to: '/recipes',   icon: '📖', label: 'Recipes' },
+  { to: '/recipe-gen',icon: '🧾', label: 'Recipe Gen' },
   { to: '/accounts',  icon: '🏪', label: 'Accounts' },
   { to: '/pricing',   icon: '💲', label: 'Pricing' },
   { to: '/baking',    icon: '🍞', label: 'Bake List' },

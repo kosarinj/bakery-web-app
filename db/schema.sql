@@ -142,6 +142,15 @@ INSERT INTO users (username, password_hash, role)
 VALUES ('admin', '$2a$10$vtOaNw1pAbFHKsKM5jP1cuDUDeUucg3PTPg95StZX1XgcQdyTWJWK', 'admin')
 ON CONFLICT DO NOTHING;
 
+-- ─── Migrations: extend recipes table ────────────────────────────────────────
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS recipe_id INTEGER;
+ALTER TABLE recipes ADD COLUMN IF NOT EXISTS space     BOOLEAN DEFAULT FALSE;
+-- Allow multiple text-only rows per product (NULL ingredient) while keeping
+-- uniqueness for actual ingredient rows
+ALTER TABLE recipes DROP CONSTRAINT IF EXISTS recipes_product_ingredient_key;
+CREATE UNIQUE INDEX IF NOT EXISTS idx_recipes_product_ingredient
+  ON recipes(product, ingredient) WHERE ingredient IS NOT NULL;
+
 -- ─── Migrations: extend ingredients table ─────────────────────────────────────
 ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS ingr_id    INTEGER;
 ALTER TABLE ingredients ADD COLUMN IF NOT EXISTS cost_cup   NUMERIC(10,4);

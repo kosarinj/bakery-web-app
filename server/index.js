@@ -564,6 +564,99 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
+// ─── Recipe Generator ──────────────────────────────────────────────────────
+
+function scaleIngredients(rows, factor) {
+  return rows.map(r => ({
+    ingredient: r.ingredient,
+    sequence: r.sequence,
+    rectext: r.rectext,
+    space: r.space,
+    teaspoons:   (parseFloat(r.teaspoons)   || 0) * factor,
+    tablespoons: (parseFloat(r.tablespoons) || 0) * factor,
+    cups:        (parseFloat(r.cups)        || 0) * factor,
+    pounds:      (parseFloat(r.pounds)      || 0) * factor,
+    qty:         (parseFloat(r.qty)         || 0) * factor,
+    ingr_unit: r.ingr_unit,
+  }))
+}
+
+app.get('/api/recipe-generator', requireAuth, async (req, res) => {
+  const dateVal = req.query.date || new Date().toISOString().slice(0, 10)
+  try {
+    // Orders for date with product batch info
+    const { rows: orders } = await query(`
+      SELECT o.prod_name, SUM(o.units) AS units,
+             p.batch, p.prod_group,
+             COALESCE(p.multiplier,1) AS multiplier,
+             COALESCE(p.divisor,1)    AS divisor
+      FROM daily_orders o
+      JOIN products p ON p.prod_name = o.prod_name
+      WHERE o.ordr_dt = $1
+      GROUP BY o.prod_name, p.batch, p.prod_group, p.multiplier, p.divisor
+      ORDER BY o.prod_name
+    `, [dateVal])
+
+    if (!orders.length) return res.json({ batch_groups: [], mult_products: [], date: dateVal })
+
+    // All recipe rows for ordered products + their group names
+    const allNames = [...new Set([
+      ...orders.map(o => o.prod_name),
+      ...orders.map(o => o.prod_group).filter(Boolean),
+    ])]
+    const { rows: recRows } = await query(`
+      SELECT r.*, i.unit AS ingr_unit
+      FROM recipes r
+      LEFT JOIN ingredients i ON i.name = r.ingredient
+      WHERE r.product = ANY($1)
+      ORDER BY r.product, r.sequence
+    `, [allNames])
+
+    // Build recipe map  { productName: [rows...] }
+    const recMap = {}
+    recRows.forEach(r => {
+      if (!recMap[r.product]) recMap[r.product] = []
+      recMap[r.product].push(r)
+    })
+
+    // Separate batch vs mult orders
+    const groupMap = {}
+    const multProducts = []
+
+    orders.forEach(o => {
+      const units = parseFloat(o.units) || 0
+      const divisor = parseFloat(o.divisor) || 1
+      const multiplier = parseFloat(o.multiplier) || 1
+
+      if (o.batch && o.prod_group) {
+        if (!groupMap[o.prod_group]) {
+          groupMap[o.prod_group] = { group: o.prod_group, products: [], total_equiv: 0, multiplier }
+        }
+        const equiv = units / divisor
+        groupMap[o.prod_group].total_equiv += equiv
+        groupMap[o.prod_group].products.push({ prod_name: o.prod_name, units, divisor, equiv })
+      } else {
+        const batches = multiplier > 0 ? Math.ceil(units / multiplier) : units
+        const recipes = recMap[o.prod_name] || []
+        multProducts.push({
+          prod_name: o.prod_name, units, multiplier, batches,
+          ingredients: scaleIngredients(recipes, batches)
+        })
+      }
+    })
+
+    const batchGroups = Object.values(groupMap).map(g => {
+      const batches = g.multiplier > 0 ? Math.ceil(g.total_equiv / g.multiplier) : 1
+      const recipes = recMap[g.group] || recMap[g.products[0]?.prod_name] || []
+      return { ...g, batches, ingredients: scaleIngredients(recipes, batches) }
+    })
+
+    res.json({ batch_groups: batchGroups, mult_products: multProducts, date: dateVal })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Export ────────────────────────────────────────────────────────────────
 
 function toCSV(rows, cols) {
@@ -604,8 +697,8 @@ const EXPORTS = {
   daily_orders:   [`SELECT order_num,account,ordr_dt,prod_name,units,wprice,rprice,del_date,special_ords,postbake_adj,notes
                     FROM daily_orders ORDER BY ordr_dt,account,prod_name`,
                    ['order_num','account','ordr_dt','prod_name','units','wprice','rprice','del_date','special_ords','postbake_adj','notes']],
-  recipes:        ['SELECT product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rectext FROM recipes ORDER BY product,sequence,ingredient',
-                   ['product','ingredient','sequence','qty','teaspoons','tablespoons','cups','pounds','rectext']],
+  recipes:        [`SELECT recipe_id,product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rec_group,space,rectext FROM recipes ORDER BY product,sequence`,
+                   ['recipe_id','product','ingredient','sequence','qty','teaspoons','tablespoons','cups','pounds','rec_group','space','rectext']],
   inventory:      ['SELECT prod_name,units,sod_inv,location FROM inventory ORDER BY prod_name',
                    ['prod_name','units','sod_inv','location']],
 }
@@ -839,18 +932,32 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             )
             break
           }
-          case 'recipes':
+          case 'recipes': {
+            const rprod = col(row,'product') || col(row,'prod_name')
+            if (!rprod) break
+            const ringr = col(row,'ingredient') || null  // NULL for text-only lines
+            const rrid  = col(row,'recipe_id') ?? col(row,'record')
+            if (ringr) {
+              await client.query(`INSERT INTO ingredients(name) VALUES($1) ON CONFLICT DO NOTHING`, [ringr])
+              await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [rprod])
+              await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [rprod])
+            }
             await client.query(
-              `INSERT INTO recipes(product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rectext,last_update)
-               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())
-               ON CONFLICT(product,ingredient) DO UPDATE SET
-                 sequence=EXCLUDED.sequence,qty=EXCLUDED.qty,teaspoons=EXCLUDED.teaspoons,
-                 tablespoons=EXCLUDED.tablespoons,cups=EXCLUDED.cups,pounds=EXCLUDED.pounds,
-                 rectext=EXCLUDED.rectext,last_update=NOW()`,
-              [col(row,'product'), col(row,'ingredient'), num(row,'sequence'), num(row,'qty'),
-               num(row,'teaspoons'), num(row,'tablespoons'), num(row,'cups'), num(row,'pounds'), col(row,'rectext')]
+              `INSERT INTO recipes(recipe_id,product,ingredient,sequence,qty,teaspoons,tablespoons,cups,pounds,rec_group,space,rectext,last_update)
+               VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,NOW())
+               ON CONFLICT(product,ingredient) WHERE ingredient IS NOT NULL DO UPDATE SET
+                 recipe_id=EXCLUDED.recipe_id,sequence=EXCLUDED.sequence,qty=EXCLUDED.qty,
+                 teaspoons=EXCLUDED.teaspoons,tablespoons=EXCLUDED.tablespoons,
+                 cups=EXCLUDED.cups,pounds=EXCLUDED.pounds,rec_group=EXCLUDED.rec_group,
+                 space=EXCLUDED.space,rectext=EXCLUDED.rectext,last_update=NOW()`,
+              [rrid ? parseInt(rrid) : null, rprod, ringr,
+               num(row,'sequence'), num(row,'qty'),
+               num(row,'teaspoons'), num(row,'tablespoons'), num(row,'cups'), num(row,'pounds'),
+               bool(row,'rec_group'), bool(row,'space'),
+               col(row,'rectext') ?? col(row,'recText')]
             )
             break
+          }
           case 'inventory':
             await client.query(
               `INSERT INTO inventory(prod_name,units,sod_inv,location,lst_updt)
