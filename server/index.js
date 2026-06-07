@@ -922,11 +922,20 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
         const placeholders = uniqueAccts.map((_, i) => `($${i + 1}, true)`).join(',')
         await query(`INSERT INTO accounts(name,active) VALUES ${placeholders} ON CONFLICT DO NOTHING`, uniqueAccts)
       }
+      // Deduplicate by (tix_date, account) — keep last occurrence
+      const dedupMap = new Map()
+      norm.forEach(r => {
+        const d = parseAccessDate(col(r,'date') || col(r,'tix_date'))
+        const a = col(r,'account')
+        if (d && a) dedupMap.set(`${d}|${a}`, r)
+      })
+      const deduped = [...dedupMap.values()]
+
       // Bulk upsert in chunks of 500
       const CHUNK = 500
       let imported = 0
-      for (let i = 0; i < norm.length; i += CHUNK) {
-        const chunk = norm.slice(i, i + CHUNK).filter(r => col(r,'account') && (col(r,'date') || col(r,'tix_date')))
+      for (let i = 0; i < deduped.length; i += CHUNK) {
+        const chunk = deduped.slice(i, i + CHUNK)
         if (!chunk.length) continue
         const vals = []
         const placeholders = chunk.map(r => {

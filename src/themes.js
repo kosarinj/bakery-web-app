@@ -40,6 +40,34 @@ export const THEMES = [
     }
   },
 
+  // ── Light themes ─────────────────────────────────────────────────
+  {
+    key: 'white',
+    label: 'Clean White',
+    vars: {
+      '--primary': '#7c3aed', '--primary-dark': '#6d28d9', '--primary-light': '#ede9fe',
+      '--nav-bg': '#ffffff',
+      '--nav-text': '#475569', '--nav-active-bg': '#f1f5f9',
+      '--nav-active-text': '#7c3aed', '--nav-hover-bg': '#f8fafc',
+      '--nav-accent': '#7c3aed', '--header-bg': '#ffffff',
+      '--header-text': '#1e293b', '--header-text-muted': '#64748b',
+      '--header-border': 'rgba(0,0,0,0.08)',
+    }
+  },
+  {
+    key: 'golden',
+    label: 'Golden',
+    vars: {
+      '--primary': '#92400e', '--primary-dark': '#78350f', '--primary-light': '#fef3c7',
+      '--nav-bg': '#f59e0b',
+      '--nav-text': '#431407', '--nav-active-bg': '#d97706',
+      '--nav-active-text': '#1c0a00', '--nav-hover-bg': '#fbbf24',
+      '--nav-accent': '#78350f', '--header-bg': '#d97706',
+      '--header-text': '#1c0a00', '--header-text-muted': '#4a200a',
+      '--header-border': 'rgba(0,0,0,0.1)',
+    }
+  },
+
   // ── Gradient themes ──────────────────────────────────────────────
   {
     key: 'sunset',
@@ -119,6 +147,8 @@ export const THEMES = [
 export const ALL_THEME_VARS = [
   '--primary', '--primary-dark', '--primary-light',
   '--nav-bg', '--nav-gradient', '--nav-accent', '--header-bg',
+  '--nav-text', '--nav-active-bg', '--nav-active-text', '--nav-hover-bg',
+  '--header-text', '--header-text-muted', '--header-border',
 ]
 
 export function applyTheme(key) {
