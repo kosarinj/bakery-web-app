@@ -2,39 +2,41 @@ import { useState, useEffect } from 'react'
 import { NavLink, Outlet } from 'react-router-dom'
 
 const NAV_ITEMS = [
-  { to: '/',          icon: '🏠', label: 'Dashboard', end: true },
-  { to: '/orders',    icon: '📋', label: 'Orders' },
-  { to: '/inventory', icon: '📦', label: 'Inventory' },
-  { to: '/products',  icon: '🥐', label: 'Products' },
-  { to: '/recipes',   icon: '📖', label: 'Recipes' },
-  { to: '/recipe-gen',icon: '🧾', label: 'Recipe Gen' },
-  { to: '/accounts',  icon: '🏪', label: 'Accounts' },
-  { to: '/pricing',   icon: '💲', label: 'Pricing' },
-  { to: '/baking',    icon: '🍞', label: 'Bake List' },
-  { to: '/billing',   icon: '🧾', label: 'Billing' },
-  { to: '/import',    icon: '⇅',  label: 'Import/Export' },
-  { to: '/settings',  icon: '⚙',  label: 'Settings' },
+  { to: '/',           label: 'Dashboard',    end: true },
+  { to: '/orders',     label: 'Orders' },
+  { to: '/inventory',  label: 'Inventory' },
+  { to: '/products',   label: 'Products' },
+  { to: '/recipes',    label: 'Recipes' },
+  { to: '/recipe-gen', label: 'Recipe Gen' },
+  { to: '/accounts',   label: 'Accounts' },
+  { to: '/pricing',    label: 'Pricing' },
+  { to: '/baking',     label: 'Bake List' },
+  { to: '/billing',    label: 'Billing' },
+  { to: '/import',     label: 'Import/Export' },
+  { to: '/settings',   label: 'Settings' },
 ]
 
 export default function Layout({ user, setUser }) {
   const [bakeryName, setBakeryName] = useState('Bakery Manager')
-  const [bgUrl, setBgUrl] = useState(() => localStorage.getItem('bakery-bg_url') || '')
-  const [bgOpacity, setBgOpacity] = useState(() => parseFloat(localStorage.getItem('bakery-bg_opacity')) || 0.08)
-  const [bgTint, setBgTint] = useState(() => localStorage.getItem('bakery-bg_tint') || 'none')
+  const [logoUrl, setLogoUrl]       = useState(() => localStorage.getItem('bakery-logo_url') || '')
+  const [bgUrl, setBgUrl]           = useState(() => localStorage.getItem('bakery-bg_url') || '')
+  const [bgOpacity, setBgOpacity]   = useState(() => parseFloat(localStorage.getItem('bakery-bg_opacity')) || 0.08)
+  const [bgTint, setBgTint]         = useState(() => localStorage.getItem('bakery-bg_tint') || 'none')
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
       .then(s => {
         if (s.bakery_name) setBakeryName(s.bakery_name)
-        if (s.bg_url)      { setBgUrl(s.bg_url);                         localStorage.setItem('bakery-bg_url', s.bg_url) }
-        if (s.bg_opacity)  { setBgOpacity(parseFloat(s.bg_opacity));     localStorage.setItem('bakery-bg_opacity', s.bg_opacity) }
-        if (s.bg_tint)     { setBgTint(s.bg_tint);                       localStorage.setItem('bakery-bg_tint', s.bg_tint) }
+        if (s.logo_url)   { setLogoUrl(s.logo_url);                        localStorage.setItem('bakery-logo_url',  s.logo_url) }
+        if (s.bg_url)     { setBgUrl(s.bg_url);                            localStorage.setItem('bakery-bg_url',    s.bg_url) }
+        if (s.bg_opacity) { setBgOpacity(parseFloat(s.bg_opacity));        localStorage.setItem('bakery-bg_opacity', s.bg_opacity) }
+        if (s.bg_tint)    { setBgTint(s.bg_tint);                          localStorage.setItem('bakery-bg_tint',   s.bg_tint) }
       })
       .catch(() => {})
 
-    // Live-update when settings page saves a new background
     function onBgChanged() {
+      setLogoUrl(localStorage.getItem('bakery-logo_url') || '')
       setBgUrl(localStorage.getItem('bakery-bg_url') || '')
       setBgOpacity(parseFloat(localStorage.getItem('bakery-bg_opacity')) || 0.08)
       setBgTint(localStorage.getItem('bakery-bg_tint') || 'none')
@@ -52,39 +54,37 @@ export default function Layout({ user, setUser }) {
     <>
       {bgUrl && (
         <>
-          <div style={{
-            position: 'fixed', inset: 0, zIndex: -1,
-            backgroundImage: `url(${bgUrl})`,
-            backgroundSize: 'cover', backgroundPosition: 'center',
-            opacity: bgOpacity,
-          }} />
-          {bgTint && bgTint !== 'none' && (
-            <div style={{ position: 'fixed', inset: 0, zIndex: -1, background: bgTint }} />
-          )}
+          <div style={{ position: 'fixed', inset: 0, zIndex: -1, backgroundImage: `url(${bgUrl})`, backgroundSize: 'cover', backgroundPosition: 'center', opacity: bgOpacity }} />
+          {bgTint && bgTint !== 'none' && <div style={{ position: 'fixed', inset: 0, zIndex: -1, background: bgTint }} />}
         </>
       )}
+
+      {/* ── Top header row ── */}
       <header className="app-header">
-        <div className="brand">{bakeryName}</div>
+        <div className="brand">
+          {logoUrl
+            ? <img src={logoUrl} alt="logo" style={{ height: 34, width: 'auto', objectFit: 'contain', borderRadius: 4 }} onError={e => e.target.style.display = 'none'} />
+            : <span style={{ fontSize: 24 }}>🥖</span>
+          }
+          <span className="brand-name">{bakeryName}</span>
+        </div>
         <div className="header-right">
           <span className="username">{user.username}</span>
           <button className="btn-logout" onClick={logout}>Sign Out</button>
         </div>
       </header>
 
-      <div className="app-layout">
-        <nav className="app-nav">
-          {NAV_ITEMS.map(({ to, icon, label, end }) => (
-            <NavLink key={to} to={to} end={end}>
-              <span className="nav-icon">{icon}</span>
-              {label}
-            </NavLink>
-          ))}
-        </nav>
+      {/* ── Horizontal nav bar ── */}
+      <nav className="top-nav">
+        {NAV_ITEMS.map(({ to, label, end }) => (
+          <NavLink key={to} to={to} end={end}>{label}</NavLink>
+        ))}
+      </nav>
 
-        <main className="app-main">
-          <Outlet />
-        </main>
-      </div>
+      {/* ── Main content ── */}
+      <main className="app-main-top">
+        <Outlet />
+      </main>
     </>
   )
 }

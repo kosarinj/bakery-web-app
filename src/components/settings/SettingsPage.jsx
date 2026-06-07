@@ -26,7 +26,7 @@ export default function SettingsPage() {
       setSettings(s => ({ ...s, [key]: value }))
       setSaved(key)
       setTimeout(() => setSaved(''), 2000)
-      if (['bg_url', 'bg_opacity', 'bg_tint'].includes(key)) {
+      if (['bg_url', 'bg_opacity', 'bg_tint', 'logo_url'].includes(key)) {
         localStorage.setItem(`bakery-${key}`, value ?? '')
         window.dispatchEvent(new Event('bakery-bg-changed'))
       }
@@ -64,6 +64,21 @@ export default function SettingsPage() {
               </button>
             </div>
           </div>
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Logo URL</label>
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              {settings.logo_url && <img src={settings.logo_url} alt="logo preview" style={{ height: 36, width: 'auto', objectFit: 'contain', borderRadius: 4, border: '1px solid var(--border)' }} onError={e => e.target.style.display='none'} />}
+              <input className="form-control" style={{ flex: 1 }} placeholder="https://… (link to your logo image)"
+                value={settings.logo_url || ''}
+                onChange={e => setSettings(s => ({ ...s, logo_url: e.target.value }))} />
+              <button className="btn btn-primary btn-sm" onClick={() => saveSetting('logo_url', settings.logo_url || '')}>
+                {saved === 'logo_url' ? '✓ Saved' : 'Save'}
+              </button>
+              {settings.logo_url && <button className="btn btn-secondary btn-sm" onClick={() => { setSettings(s => ({ ...s, logo_url: '' })); saveSetting('logo_url', '') }}>Remove</button>}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Appears in the top-left of every page.</div>
+          </div>
+
           <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Baking Date</label>
             <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>

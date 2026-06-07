@@ -64,23 +64,15 @@ body {
 }
 
 .app-header .brand {
-  width: var(--nav-width);
   padding: 0 20px;
   font-size: 15px;
   font-weight: 700;
   color: var(--header-text);
   letter-spacing: -0.01em;
   white-space: nowrap;
-  overflow: hidden;
-  text-overflow: ellipsis;
   display: flex;
   align-items: center;
-  gap: 8px;
-}
-
-.app-header .brand::before {
-  content: '🥖';
-  font-size: 18px;
+  gap: 10px;
 }
 
 .app-header .header-right {
@@ -113,70 +105,58 @@ body {
   color: var(--header-text);
 }
 
-.app-layout {
-  display: flex;
-  padding-top: var(--header-height);
-  height: 100vh;
-}
+/* ── Top Nav Bar ───────────────────────────────────── */
 
-/* ── Sidebar Nav ───────────────────────────────────── */
+:root { --topnav-height: 42px; }
 
-.app-nav {
+.top-nav {
   position: fixed;
   top: var(--header-height);
-  left: 0; bottom: 0;
-  width: var(--nav-width);
+  left: 0; right: 0;
+  height: var(--topnav-height);
   background: var(--nav-gradient, var(--nav-bg));
-  overflow-y: auto;
-  z-index: 50;
-  padding: 12px 8px;
-  display: flex;
-  flex-direction: column;
-  gap: 2px;
-}
-
-.app-nav a {
   display: flex;
   align-items: center;
-  gap: 10px;
-  padding: 8px 12px;
+  padding: 0 12px;
+  gap: 2px;
+  z-index: 90;
+  border-bottom: 1px solid rgba(255,255,255,0.06);
+  overflow-x: auto;
+  scrollbar-width: none;
+}
+.top-nav::-webkit-scrollbar { display: none; }
+
+.top-nav a {
+  display: flex;
+  align-items: center;
+  padding: 5px 12px;
   color: var(--nav-text);
   text-decoration: none;
-  font-size: 13.5px;
+  font-size: 13px;
   font-weight: 500;
   border-radius: var(--radius-sm);
   transition: all 0.12s;
+  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-.app-nav a:hover {
+.top-nav a:hover {
   background: var(--nav-hover-bg);
-  color: #cbd5e1;
+  color: var(--header-text);
 }
 
-.app-nav a.active {
+.top-nav a.active {
   background: var(--nav-active-bg);
   color: var(--nav-active-text);
 }
 
-.app-nav a.active .nav-icon {
-  filter: none;
-}
-
-.nav-icon {
-  font-size: 15px;
-  width: 20px;
-  text-align: center;
-  flex-shrink: 0;
-}
-
 /* ── Main Content ──────────────────────────────────── */
 
-.app-main {
-  margin-left: var(--nav-width);
-  flex: 1;
-  overflow: auto;
+.app-main-top {
+  margin-top: calc(var(--header-height) + var(--topnav-height));
   padding: 24px;
-  min-width: 0;
+  min-height: calc(100vh - var(--header-height) - var(--topnav-height));
+  overflow: auto;
 }
 
 /* ── Loading / Error ──────────────────────────────── */
