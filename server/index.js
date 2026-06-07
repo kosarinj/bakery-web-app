@@ -96,7 +96,6 @@ app.delete('/api/users/:id', requireAuth, async (req, res) => {
     await query('DELETE FROM users WHERE id=$1', [req.params.id])
     res.json({ success: true })
   } catch (e) { res.status(500).json({ error: e.message }) }
-}
 })
 
 app.get('/api/me', (req, res) => {
