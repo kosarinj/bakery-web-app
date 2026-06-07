@@ -367,6 +367,18 @@ app.delete('/api/orders/:id', requireAuth, async (req, res) => {
   res.json({ success: true })
 })
 
+// Set delivery date for all orders of an account on a given order date
+app.patch('/api/orders/del-date', requireAuth, async (req, res) => {
+  const { ordr_dt, account, del_date } = req.body
+  try {
+    await query(
+      `UPDATE daily_orders SET del_date=$1, last_update=NOW() WHERE ordr_dt=$2 AND account=$3`,
+      [del_date || null, ordr_dt, account]
+    )
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // Copy orders from one date to another (skips account+product pairs already entered on to_date)
 // Optional: accounts array limits which accounts are copied
 app.post('/api/orders/copy', requireAuth, async (req, res) => {

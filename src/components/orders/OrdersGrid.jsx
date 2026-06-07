@@ -81,6 +81,7 @@ export default function OrdersGrid() {
   const [accounts, setAccounts] = useState([])
   const [products, setProducts] = useState([])
   const [orderMap, setOrderMap] = useState({})
+  const [delDateMap, setDelDateMap] = useState({})  // accountName → del_date string
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
 
@@ -156,10 +157,15 @@ export default function OrdersGrid() {
         if (!Array.isArray(prods)) { setError(`Products: ${prods?.error || 'load failed'}`); setLoading(false); return }
         setAccounts(accts); setProducts(prods)
         const map = {}
+        const ddMap = {}
         ;(Array.isArray(orders) ? orders : []).forEach(o => {
           map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
+          if (o.del_date && !ddMap[o.account]) ddMap[o.account] = String(o.del_date).slice(0, 10)
         })
-        setOrderMap(map); orderMapRef.current = map; setLoading(false)
+        // Seed missing accounts from account.next_del
+        accts.forEach(a => { if (!ddMap[a.name] && a.next_del) ddMap[a.name] = String(a.next_del).slice(0, 10) })
+        setOrderMap(map); orderMapRef.current = map
+        setDelDateMap(ddMap); setLoading(false)
       })
       .catch(e => { setError(String(e.message || e)); setLoading(false) })
   }, [date])
@@ -186,6 +192,16 @@ export default function OrdersGrid() {
       }
     } catch (e) { setError(`Save failed: ${e.message}`) }
   }, [])
+
+  async function saveDelDate(account, del_date) {
+    setDelDateMap(prev => ({ ...prev, [account]: del_date }))
+    try {
+      await fetch('/api/orders/del-date', {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ ordr_dt: date, account, del_date })
+      })
+    } catch (e) { setError(`Del date save failed: ${e.message}`) }
+  }
 
   async function copyOrders() {
     if (!copyFrom || !copyTo) return
@@ -438,12 +454,22 @@ export default function OrdersGrid() {
                 <th className="sticky-col" style={{ minWidth: 130 }}>
                   {flipped ? 'Product' : 'Account'}
                 </th>
-                {cols.map(c => (
-                  <th key={colKey(c)} title={flipped ? (c.route||'') : (c.prod_group||'')}
-                    style={{ textAlign: 'right', minWidth: 60 }}>
-                    {colLabel(c)}
-                  </th>
-                ))}
+                {cols.map(c => {
+                  const isAcct = flipped  // in flipped mode cols are accounts
+                  const dd = isAcct ? delDateMap[c.name] : null
+                  return (
+                    <th key={colKey(c)} title={isAcct ? (c.route||'') : (c.prod_group||'')}
+                      style={{ textAlign: 'right', minWidth: isAcct ? 80 : 60 }}>
+                      <div>{colLabel(c)}</div>
+                      {isAcct && (
+                        <input type="date" value={dd || ''}
+                          onChange={e => saveDelDate(c.name, e.target.value)}
+                          title="Delivery date for this account"
+                          style={{ fontSize: 10, border: 'none', background: 'transparent', color: 'rgba(255,255,255,0.7)', cursor: 'pointer', width: 90, marginTop: 2, textAlign: 'right' }} />
+                      )}
+                    </th>
+                  )
+                })}
                 <th style={{ textAlign: 'right', minWidth: 60 }}>Total</th>
               </tr>
             </thead>
@@ -455,7 +481,15 @@ export default function OrdersGrid() {
                 }, 0)
                 return (
                   <tr key={rowKey(r)}>
-                    <td className="sticky-col acct-name">{rowLabel(r)}</td>
+                    <td className="sticky-col acct-name">
+                      <div>{rowLabel(r)}</div>
+                      {!flipped && (
+                        <input type="date" value={delDateMap[r.name] || ''}
+                          onChange={e => saveDelDate(r.name, e.target.value)}
+                          title="Delivery date"
+                          style={{ fontSize: 10, color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer', width: '100%', marginTop: 1 }} />
+                      )}
+                    </td>
                     {cols.map(c => {
                       const val = cellVal(r, c)
                       return (
