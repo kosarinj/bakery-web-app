@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import EditableCell from '../shared/EditableCell'
 
 const fmt$ = v => v != null ? `$${parseFloat(v).toFixed(2)}` : '—'
+const fmtDate = d => { if (!d) return '—'; const s = String(d).slice(0,10); return new Date(s + 'T00:00:00').toLocaleDateString() }
 
 export default function BillingPage() {
   const [view, setView] = useState('tickets')  // 'tickets' | 'aged'
@@ -185,7 +186,7 @@ export default function BillingPage() {
                         <td style={{ textAlign: 'center' }}>
                           <input type="checkbox" checked={selected.has(t.id)} onChange={() => toggleSelect(t.id)} />
                         </td>
-                        <td style={{ fontSize: 13 }}>{new Date(t.tix_date + 'T00:00:00').toLocaleDateString()}</td>
+                        <td style={{ fontSize: 13 }}>{fmtDate(t.tix_date)}</td>
                         <td style={{ fontWeight: 500 }}>{t.account}</td>
                         <td style={{ color: 'var(--text-muted)', fontSize: 12 }}>{t.route || '—'}</td>
                         <td style={{ textAlign: 'right', paddingRight: 10 }}>{fmt$(total)}</td>
@@ -241,12 +242,12 @@ export default function BillingPage() {
                       <td style={{ fontWeight: 500 }}>{a.account}</td>
                       <td style={{ textAlign: 'right', paddingRight: 10 }}>{parseFloat(a.age_0_30) > 0 ? fmt$(a.age_0_30) : '—'}</td>
                       <td style={{ textAlign: 'right', paddingRight: 10 }}>{parseFloat(a.age_31_60) > 0 ? fmt$(a.age_31_60) : '—'}</td>
-                      <td style={{ textAlign: 'right', paddingRight: 10 }}>{parseFloat(a.age_61_60) > 0 ? fmt$(a.age_61_90) : '—'}</td>
+                      <td style={{ textAlign: 'right', paddingRight: 10 }}>{parseFloat(a.age_61_90) > 0 ? fmt$(a.age_61_90) : '—'}</td>
                       <td style={{ textAlign: 'right', paddingRight: 10, color: parseFloat(a.age_90_plus) > 0 ? 'var(--error)' : undefined, fontWeight: parseFloat(a.age_90_plus) > 0 ? 600 : 400 }}>
                         {parseFloat(a.age_90_plus) > 0 ? fmt$(a.age_90_plus) : '—'}
                       </td>
                       <td style={{ textAlign: 'right', paddingRight: 10, fontWeight: 700, color: 'var(--primary)' }}>{fmt$(a.total_outstanding)}</td>
-                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.last_bill_date ? new Date(a.last_bill_date + 'T00:00:00').toLocaleDateString() : '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{a.last_bill_date ? fmtDate(a.last_bill_date) : '—'}</td>
                     </tr>
                   ))}
                   {aged.length > 0 && (

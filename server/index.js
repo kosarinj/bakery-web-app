@@ -56,6 +56,49 @@ app.post('/api/logout', (req, res) => {
   res.json({ success: true })
 })
 
+// ─── User Management ───────────────────────────────────────────────────────
+
+app.get('/api/users', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query('SELECT id, username, role, created_at FROM users ORDER BY username')
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/users', requireAuth, async (req, res) => {
+  const { username, password, role } = req.body
+  if (!username || !password) return res.status(400).json({ error: 'username and password required' })
+  try {
+    const hash = await bcrypt.hash(password, 10)
+    const { rows } = await query(
+      `INSERT INTO users(username, password_hash, role) VALUES($1,$2,$3) RETURNING id, username, role, created_at`,
+      [username.trim(), hash, role || 'user']
+    )
+    res.json(rows[0])
+  } catch (e) {
+    res.status(400).json({ error: e.message.includes('unique') ? 'Username already exists' : e.message })
+  }
+})
+
+app.patch('/api/users/:id/password', requireAuth, async (req, res) => {
+  const { password } = req.body
+  if (!password) return res.status(400).json({ error: 'password required' })
+  try {
+    const hash = await bcrypt.hash(password, 10)
+    await query('UPDATE users SET password_hash=$1 WHERE id=$2', [hash, req.params.id])
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.delete('/api/users/:id', requireAuth, async (req, res) => {
+  if (parseInt(req.params.id) === req.session.user.id) return res.status(400).json({ error: "Can't delete your own account" })
+  try {
+    await query('DELETE FROM users WHERE id=$1', [req.params.id])
+    res.json({ success: true })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+}
+})
+
 app.get('/api/me', (req, res) => {
   res.json(req.session?.user || null)
 })

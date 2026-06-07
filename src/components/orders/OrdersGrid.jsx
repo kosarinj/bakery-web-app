@@ -92,7 +92,7 @@ export default function OrdersGrid() {
   // Layout toggles
   const [hideEmptyRows, setHideEmptyRows] = useState(true)
   const [hideEmptyCols, setHideEmptyCols] = useState(true)
-  const [flipped, setFlipped] = useState(false)
+  const [flipped, setFlipped] = useState(true)
 
   // Filters
   const [filterProduct, setFilterProduct] = useState('')

@@ -13,6 +13,7 @@ const NAV_ITEMS = [
   { to: '/baking',     label: 'Bake List' },
   { to: '/billing',    label: 'Billing' },
   { to: '/import',     label: 'Import/Export' },
+  { to: '/users',      label: 'Users' },
   { to: '/settings',   label: 'Settings' },
 ]
 
