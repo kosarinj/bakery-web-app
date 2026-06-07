@@ -353,6 +353,54 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 })
 
 // Orders summary: units per product for a given date (for bake list / have-need)
+app.get('/api/dashboard/revenue-trend', requireAuth, async (req, res) => {
+  const days = Math.min(parseInt(req.query.days) || 30, 90)
+  try {
+    const { rows } = await query(`
+      SELECT ordr_dt::text AS date,
+             SUM(wprice * units)  AS revenue,
+             SUM(units)           AS units,
+             COUNT(DISTINCT account) AS accounts
+      FROM daily_orders
+      WHERE ordr_dt >= CURRENT_DATE - $1
+      GROUP BY ordr_dt ORDER BY ordr_dt
+    `, [days])
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/dashboard/by-type', requireAuth, async (req, res) => {
+  const { date } = req.query
+  const dateVal = date || new Date().toISOString().slice(0, 10)
+  try {
+    const { rows } = await query(`
+      SELECT COALESCE(p.prod_type, 'Other') AS type,
+             SUM(o.units) AS units,
+             SUM(o.wprice * o.units) AS revenue
+      FROM daily_orders o
+      JOIN products p ON p.prod_name = o.prod_name
+      WHERE o.ordr_dt = $1
+      GROUP BY p.prod_type ORDER BY units DESC
+    `, [dateVal])
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/dashboard/top-accounts', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT o.account,
+             SUM(o.units)            AS total_units,
+             SUM(o.wprice * o.units) AS revenue,
+             COUNT(DISTINCT o.ordr_dt) AS order_days
+      FROM daily_orders o
+      WHERE o.ordr_dt >= CURRENT_DATE - 30
+      GROUP BY o.account ORDER BY revenue DESC LIMIT 8
+    `)
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 app.get('/api/dashboard', requireAuth, async (req, res) => {
   const today = new Date().toISOString().slice(0, 10)
   const [accts, prods, orders] = await Promise.all([
@@ -861,6 +909,45 @@ const parseAccessDate = v => {
 app.post('/api/import/:table', requireAuth, async (req, res) => {
   const { rows } = req.body
   if (!Array.isArray(rows) || !rows.length) return res.json({ imported: 0, errors: [] })
+
+  // Fast bulk path for large tables
+  if (req.params.table === 'track_tix') {
+    try {
+      const norm = rows.map(r =>
+        Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
+      )
+      // Bulk create missing account stubs
+      const uniqueAccts = [...new Set(norm.map(r => col(r,'account')).filter(Boolean))]
+      if (uniqueAccts.length) {
+        const placeholders = uniqueAccts.map((_, i) => `($${i + 1}, true)`).join(',')
+        await query(`INSERT INTO accounts(name,active) VALUES ${placeholders} ON CONFLICT DO NOTHING`, uniqueAccts)
+      }
+      // Bulk upsert in chunks of 500
+      const CHUNK = 500
+      let imported = 0
+      for (let i = 0; i < norm.length; i += CHUNK) {
+        const chunk = norm.slice(i, i + CHUNK).filter(r => col(r,'account') && (col(r,'date') || col(r,'tix_date')))
+        if (!chunk.length) continue
+        const vals = []
+        const placeholders = chunk.map(r => {
+          const base = vals.length
+          const tdate = parseAccessDate(col(r,'date') || col(r,'tix_date'))
+          const lupdt = parseAccessDate(col(r,'last_update')) || new Date().toISOString().slice(0,10)
+          vals.push(tdate, col(r,'account'), num(r,'total'), num(r,'paid'), lupdt)
+          return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5})`
+        }).join(',')
+        const { rowCount } = await query(`
+          INSERT INTO track_tix(tix_date,account,total,paid,last_update) VALUES ${placeholders}
+          ON CONFLICT(tix_date,account) DO UPDATE SET
+            total=EXCLUDED.total, paid=EXCLUDED.paid, last_update=EXCLUDED.last_update
+        `, vals)
+        imported += rowCount
+      }
+      return res.json({ imported, errors: [] })
+    } catch (e) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
 
   const norm = rows.map(r =>
     Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
