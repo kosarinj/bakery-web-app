@@ -1155,6 +1155,68 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
     }
   }
 
+  // Fast bulk path for spec_orders
+  if (req.params.table === 'spec_orders') {
+    try {
+      const norm = rows.map(r =>
+        Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
+      )
+      // Filter to valid rows only
+      const valid = norm.map(r => {
+        const sacc  = col(r,'account') || col(r,'cust')
+        const sprod = col(r,'prod_name')
+        const sdate = parseAccessDate(col(r,'ordr_dt'))
+        if (!sacc || !sprod || !sdate) return null
+        return { sacc, sprod, sdate,
+          sonum:    col(r,'order_num'),
+          location: col(r,'location'),
+          del_date: parseAccessDate(col(r,'del_date')),
+          units:    num(r,'units'),
+          price:    num(r,'price'),
+          phone:    col(r,'phone'),
+          notes:    col(r,'notes'),
+        }
+      }).filter(Boolean)
+
+      if (!valid.length) return res.json({ imported: 0, errors: [{ error: 'No valid rows (missing account, prod_name, or ordr_dt)', row: {} }] })
+
+      // Bulk-create missing account and product stubs
+      const uniqueAccts = [...new Set(valid.map(r => r.sacc))]
+      const uniqueProds = [...new Set(valid.map(r => r.sprod))]
+      if (uniqueAccts.length) {
+        const ph = uniqueAccts.map((_, i) => `($${i+1},true)`).join(',')
+        await query(`INSERT INTO accounts(name,active) VALUES ${ph} ON CONFLICT DO NOTHING`, uniqueAccts)
+      }
+      if (uniqueProds.length) {
+        const ph = uniqueProds.map((_, i) => `($${i+1},true)`).join(',')
+        await query(`INSERT INTO products(prod_name,active) VALUES ${ph} ON CONFLICT DO NOTHING`, uniqueProds)
+        await query(`INSERT INTO inventory(prod_name) SELECT unnest($1::text[]) ON CONFLICT DO NOTHING`, [uniqueProds])
+      }
+
+      // Bulk insert in chunks of 500
+      const CHUNK = 500
+      let imported = 0
+      for (let i = 0; i < valid.length; i += CHUNK) {
+        const chunk = valid.slice(i, i + CHUNK)
+        const vals = []
+        const ph = chunk.map(r => {
+          const base = vals.length
+          vals.push(r.sonum ? parseInt(r.sonum) : null, r.sacc, r.location, r.sdate,
+                    r.del_date, r.sprod, r.units, r.price, r.phone, r.notes)
+          return `($${base+1},$${base+2},$${base+3},$${base+4},$${base+5},$${base+6},$${base+7},$${base+8},$${base+9},$${base+10},NOW())`
+        }).join(',')
+        const { rowCount } = await query(`
+          INSERT INTO spec_orders(order_num,account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+          VALUES ${ph} ON CONFLICT DO NOTHING
+        `, vals)
+        imported += rowCount
+      }
+      return res.json({ imported, errors: [] })
+    } catch (e) {
+      return res.status(500).json({ error: e.message })
+    }
+  }
+
   const norm = rows.map(r =>
     Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
   )
