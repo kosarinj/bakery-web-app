@@ -140,6 +140,7 @@ function AccessDBPanel() {
   const [fileName, setFileName] = useState('')
   const [loading, setLoading] = useState(false)
   const [loadMsg, setLoadMsg] = useState('')
+  const [loadError, setLoadError] = useState('')
   const [tableInfo, setTableInfo] = useState([])
   const [busy, setBusy]       = useState({})
   const [results, setResults] = useState({})
@@ -147,7 +148,7 @@ function AccessDBPanel() {
   async function handleFile(e) {
     const file = e.target.files[0]
     if (!file) return
-    setLoading(true); setLoadMsg('Reading file…'); setDb(null); setTableInfo([]); setResults({})
+    setLoading(true); setLoadMsg('Reading file…'); setLoadError(''); setDb(null); setTableInfo([]); setResults({})
     try {
       const buf = await file.arrayBuffer()
       setLoadMsg('Parsing database…')
@@ -167,7 +168,8 @@ function AccessDBPanel() {
       setTableInfo(info)
       setLoadMsg('')
     } catch (err) {
-      setLoadMsg('Error: ' + err.message)
+      setLoadError(err.message)
+      console.error('MDB load error:', err)
     } finally { setLoading(false) }
   }
 
@@ -220,16 +222,20 @@ function AccessDBPanel() {
       </p>
 
       {/* File picker */}
-      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 8 }}>
         <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} disabled={loading}>
           {loading ? loadMsg : (db ? '↺ Choose different file' : 'Choose .mdb file')}
         </button>
         {fileName && !loading && (
           <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{fileName}</span>
         )}
-        {loading && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{loadMsg}</span>}
         <input ref={fileRef} type="file" accept=".mdb,.accdb" style={{ display: 'none' }} onChange={handleFile} />
       </div>
+      {loadError && (
+        <div style={{ color: 'var(--error)', fontSize: 13, marginBottom: 10 }}>
+          ✕ {loadError}
+        </div>
+      )}
 
       {/* Table grid */}
       {tableInfo.length > 0 && (
