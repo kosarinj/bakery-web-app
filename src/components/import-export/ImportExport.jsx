@@ -198,7 +198,7 @@ function AccessDBPanel() {
 
       if (cfg.chunked) {
         // Process one source table at a time to keep browser memory manageable
-        const CHUNK = 3000
+        const CHUNK = 10000
         let totalImported = 0
         const totalRows = tableInfo.find(t => t.key === key)?.rows ?? 0
         for (const mdbName of cfg.mdbNames) {
