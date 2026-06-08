@@ -351,7 +351,7 @@ export async function importExtras(tbl, q) {
     wprice:       mnum(r.wprice) ?? 0,
     rprice:       mnum(r.rprice) ?? 0,
     del_date:     midate(r.del_date),
-    special_ords: mbool(r.special_ords),
+    special_ords: false,
     postbake_adj: mnum(r.postbake_adj) ?? 0,
   })).filter(r => r.account && r.ordr_dt && r.prod_name)
   return importDailyOrderRows(rows, q)
