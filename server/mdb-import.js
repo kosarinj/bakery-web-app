@@ -304,6 +304,59 @@ export async function importTrackTix(tbl, q) {
   })
 }
 
+async function importDailyOrderRows(rows, q) {
+  if (!rows.length) return 0
+  const accts = [...new Set(rows.map(r => r.account))]
+  const prods = [...new Set(rows.map(r => r.prod_name))]
+  for (let i = 0; i < accts.length; i += 200) {
+    const c = accts.slice(i, i + 200)
+    await q(`INSERT INTO accounts(name,active) VALUES ${c.map((_,j)=>`($${j+1},false)`).join(',')} ON CONFLICT DO NOTHING`, c)
+  }
+  for (let i = 0; i < prods.length; i += 200) {
+    const c = prods.slice(i, i + 200)
+    await q(`INSERT INTO products(prod_name,active) VALUES ${c.map((_,j)=>`($${j+1},true)`).join(',')} ON CONFLICT DO NOTHING`, c)
+    await q(`INSERT INTO inventory(prod_name) SELECT unnest($1::text[]) ON CONFLICT DO NOTHING`, [c])
+  }
+  const cols = ['order_num','account','ordr_dt','prod_name','units','wprice','rprice','del_date','special_ords','postbake_adj']
+  return chunkInsert(rows, 500, async chunk => {
+    const vals = chunk.flatMap(r => cols.map(c => r[c]))
+    const ph = chunk.map((_, ri) => '(' + cols.map((_, ci) => `$${ri*cols.length+ci+1}`).join(',') + ')').join(',')
+    await q(`INSERT INTO daily_orders(${cols.join(',')}) VALUES ${ph} ON CONFLICT (order_num) WHERE order_num IS NOT NULL DO NOTHING`, vals)
+  })
+}
+
+export async function importOrderHistory(tbl, q) {
+  const rows = tbl('_').map(r => ({
+    order_num:    mordnum(r.order_num),
+    account:      mstr(r.account),
+    ordr_dt:      midate(r.ordr_dt),
+    prod_name:    mstr(r.prod_name),
+    units:        mnum(r.units) ?? 0,
+    wprice:       mnum(r.wprice) ?? 0,
+    rprice:       mnum(r.rprice) ?? 0,
+    del_date:     midate(r.del_date),
+    special_ords: mbool(r.special_ords),
+    postbake_adj: mnum(r.postbake_adj) ?? 0,
+  })).filter(r => r.account && r.ordr_dt && r.prod_name)
+  return importDailyOrderRows(rows, q)
+}
+
+export async function importExtras(tbl, q) {
+  const rows = tbl('_').map(r => ({
+    order_num:    mordnum(r.order_num),
+    account:      mstr(r.account),
+    ordr_dt:      midate(r.ordr_dt),
+    prod_name:    mstr(r.prod_name),
+    units:        mnum(r.units) ?? 0,
+    wprice:       mnum(r.wprice) ?? 0,
+    rprice:       mnum(r.rprice) ?? 0,
+    del_date:     midate(r.del_date),
+    special_ords: true,
+    postbake_adj: 0,
+  })).filter(r => r.account && r.ordr_dt && r.prod_name)
+  return importDailyOrderRows(rows, q)
+}
+
 // ── Dispatch by key ───────────────────────────────────────────────────────────
 export const IMPORTERS = {
   accounts:       importAccounts,
@@ -315,4 +368,6 @@ export const IMPORTERS = {
   inventory:      importInventory,
   spec_orders:    importSpecOrders,
   track_tix:      importTrackTix,
+  order_history:  importOrderHistory,
+  extras:         importExtras,
 }

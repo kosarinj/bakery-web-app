@@ -119,6 +119,21 @@ const MDB_TABLE_MAP = {
   inventory:      { mdbNames: ['Inventory'],                         label: 'Inventory'      },
   spec_orders:    { mdbNames: ['spec_ord'],                          label: 'Special Orders' },
   track_tix:      { mdbNames: ['Track_tix', 'Track_tix_20201215'],   label: 'Track Tickets'  },
+  order_history:  {
+    mdbNames: [
+      'ordershist', 'ordershist2', 'ordershist3',
+      'ordershist_asof_20170825', 'ordershist050816', 'ordershist_20250225',
+      'daily_ord', 'daily_ord_bk',
+      'daily_ord_20201214', 'daily_ord_20201215', 'dily_ord_20201027',
+    ],
+    label: 'Order History',
+    chunked: true,
+  },
+  extras: {
+    mdbNames: ['extras', 'extrashist'],
+    label: 'Extras → Orders',
+    chunked: true,
+  },
 }
 
 function rowsToCSV(rows) {
@@ -179,23 +194,43 @@ function AccessDBPanel() {
     setBusy(p => ({ ...p, [key]: true }))
     setResults(p => ({ ...p, [key]: null }))
     try {
-      // Collect rows from all MDB source tables for this key (combines Track_tix tables, etc.)
       const nameMap = new Map(db.getTableNames().map(t => [t.toLowerCase(), t]))
-      const allRows = []
-      cfg.mdbNames.forEach(n => {
-        const real = nameMap.get(n.toLowerCase())
-        if (real) allRows.push(...db.getTable(real).getData())
-      })
-      const csv = rowsToCSV(allRows)
-      const r = await fetch(`/api/access/import-rows/${key}`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'text/csv' },
-        credentials: 'include',
-        body: csv,
-      })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error)
-      setResults(p => ({ ...p, [key]: d }))
+
+      if (cfg.chunked) {
+        // Process one source table at a time to keep browser memory manageable
+        const CHUNK = 3000
+        let totalImported = 0
+        const totalRows = tableInfo.find(t => t.key === key)?.rows ?? 0
+        for (const mdbName of cfg.mdbNames) {
+          const real = nameMap.get(mdbName.toLowerCase())
+          if (!real) continue
+          const srcRows = db.getTable(real).getData()
+          for (let i = 0; i < srcRows.length; i += CHUNK) {
+            const csv = rowsToCSV(srcRows.slice(i, i + CHUNK))
+            const r = await fetch(`/api/access/import-rows/${key}`, {
+              method: 'POST', headers: { 'Content-Type': 'text/csv' }, credentials: 'include', body: csv,
+            })
+            const d = await r.json()
+            if (!r.ok) throw new Error(d.error)
+            totalImported += d.imported
+            setResults(p => ({ ...p, [key]: { progress: true, imported: totalImported, total: totalRows } }))
+          }
+        }
+        setResults(p => ({ ...p, [key]: { imported: totalImported } }))
+      } else {
+        const allRows = []
+        cfg.mdbNames.forEach(n => {
+          const real = nameMap.get(n.toLowerCase())
+          if (real) allRows.push(...db.getTable(real).getData())
+        })
+        const csv = rowsToCSV(allRows)
+        const r = await fetch(`/api/access/import-rows/${key}`, {
+          method: 'POST', headers: { 'Content-Type': 'text/csv' }, credentials: 'include', body: csv,
+        })
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error)
+        setResults(p => ({ ...p, [key]: d }))
+      }
     } catch (err) {
       setResults(p => ({ ...p, [key]: { error: err.message } }))
     } finally {
@@ -204,7 +239,8 @@ function AccessDBPanel() {
   }
 
   async function importAll() {
-    for (const t of tableInfo.filter(t => t.found)) {
+    // Skip chunked (large history) tables — import those manually
+    for (const t of tableInfo.filter(t => t.found && !MDB_TABLE_MAP[t.key]?.chunked)) {
       await importTable(t.key)
     }
   }
@@ -268,6 +304,9 @@ function AccessDBPanel() {
                     <td>
                       <div style={{ fontWeight: 600, fontSize: 13 }}>{t.label}</div>
                       {!t.found && <div style={{ fontSize: 11, color: 'var(--error)' }}>Not found in this file</div>}
+                      {t.found && MDB_TABLE_MAP[t.key]?.chunked && (
+                        <div style={{ fontSize: 11, color: 'var(--text-muted)' }}>imported separately — not included in Import All</div>
+                      )}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
                       {t.found ? t.rows.toLocaleString() : '—'}
@@ -282,9 +321,13 @@ function AccessDBPanel() {
                       {res && (
                         res.error
                           ? <span style={{ color: 'var(--error)', fontSize: 12 }}>✕ {res.error}</span>
-                          : <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
-                              ✓ {res.imported?.toLocaleString()} rows
-                            </span>
+                          : res.progress
+                            ? <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                {res.imported?.toLocaleString()} / {res.total?.toLocaleString()} rows…
+                              </span>
+                            : <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
+                                ✓ {res.imported?.toLocaleString()} rows
+                              </span>
                       )}
                     </td>
                   </tr>
