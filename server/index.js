@@ -35,6 +35,15 @@ const requireAuth = (req, res, next) => {
   next()
 }
 
+async function logActivity(req, action, details = '') {
+  try {
+    await query(
+      `INSERT INTO activity_log(username, action, details, ip) VALUES($1,$2,$3,$4)`,
+      [req.session?.user?.username || 'system', action, details, req.ip]
+    )
+  } catch {}
+}
+
 // ─── Auth ──────────────────────────────────────────────────────────────────
 
 app.post('/api/login', async (req, res) => {
@@ -45,6 +54,7 @@ app.post('/api/login', async (req, res) => {
     const valid = await bcrypt.compare(password, rows[0].password_hash)
     if (!valid) return res.status(401).json({ error: 'Invalid credentials' })
     req.session.user = { id: rows[0].id, username: rows[0].username, role: rows[0].role }
+    await logActivity(req, 'login', `User logged in`)
     res.json({ success: true, user: req.session.user })
   } catch (e) {
     res.status(500).json({ error: e.message })
@@ -387,9 +397,10 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
   const hasAcctFilter = Array.isArray(accounts) && accounts.length > 0
   try {
     const { rows } = await query(`
-      INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, last_update)
-      SELECT f.prod_name, f.account, f.units, f.wprice, f.rprice, $2::date, NOW()
+      INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, del_date, last_update)
+      SELECT f.prod_name, f.account, f.units, f.wprice, f.rprice, $2::date, a.next_del, NOW()
       FROM daily_orders f
+      JOIN accounts a ON a.name = f.account
       WHERE f.ordr_dt = $1
         ${hasAcctFilter ? 'AND f.account = ANY($3::text[])' : ''}
         AND NOT EXISTS (
@@ -400,8 +411,10 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
         )
       RETURNING *
     `, hasAcctFilter ? [from_date, to_date, accounts] : [from_date, to_date])
+    await logActivity(req, 'repeat_orders', `Copied ${rows.length} orders from ${from_date} to ${to_date}`)
     res.json({ copied: rows.length, rows })
   } catch (e) {
+    await logActivity(req, 'repeat_orders_error', `Error copying orders from ${from_date} to ${to_date}: ${e.message}`)
     res.status(400).json({ error: e.message })
   }
 })
@@ -522,8 +535,12 @@ app.post('/api/ingredients', requireAuth, async (req, res) => {
 })
 
 app.patch('/api/ingredients/:id', requireAuth, async (req, res) => {
-  const { name, unit, notes } = req.body
-  await query('UPDATE ingredients SET name=$1,unit=$2,notes=$3 WHERE id=$4', [name, unit, notes, req.params.id])
+  const fields = ['name', 'unit', 'cost_cup', 'cost_pound', 'cup_pound', 'notes']
+  const updates = [], vals = []
+  fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
+  if (!updates.length) return res.json({ success: true })
+  vals.push(req.params.id)
+  await query(`UPDATE ingredients SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)
   res.json({ success: true })
 })
 
@@ -560,6 +577,7 @@ app.put('/api/recipes', requireAuth, async (req, res) => {
          qty=EXCLUDED.qty, rectext=EXCLUDED.rectext, last_update=NOW()`,
       [product, ingredient, sequence||0, teaspoons||0, tablespoons||0, cups||0, pounds||0, rec_group||false, qty||0, rectext]
     )
+    await logActivity(req, 'recipe_add', `Added ${ingredient} to recipe for ${product}`)
     res.json({ success: true })
   } catch (e) {
     res.status(400).json({ error: e.message })
@@ -573,11 +591,14 @@ app.patch('/api/recipes/:id', requireAuth, async (req, res) => {
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   vals.push(req.params.id)
   await query(`UPDATE recipes SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)
+  await logActivity(req, 'recipe_edit', `Updated recipe row ${req.params.id}: ${Object.keys(req.body).join(', ')}`)
   res.json({ success: true })
 })
 
 app.delete('/api/recipes/:id', requireAuth, async (req, res) => {
+  const { rows } = await query('SELECT product, ingredient FROM recipes WHERE id=$1', [req.params.id])
   await query('DELETE FROM recipes WHERE id=$1', [req.params.id])
+  if (rows.length) await logActivity(req, 'recipe_delete', `Removed ${rows[0].ingredient} from recipe for ${rows[0].product}`)
   res.json({ success: true })
 })
 
@@ -732,8 +753,12 @@ app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
         )
       RETURNING *
     `, hasAcctFilter ? [from_date, to_date, accounts] : [from_date, to_date])
+    await logActivity(req, 'repeat_spec_orders', `Copied ${rows.length} special orders from ${from_date} to ${to_date}`)
     res.json({ copied: rows.length, rows })
-  } catch (e) { res.status(400).json({ error: e.message }) }
+  } catch (e) {
+    await logActivity(req, 'repeat_spec_orders_error', `Error copying special orders from ${from_date} to ${to_date}: ${e.message}`)
+    res.status(400).json({ error: e.message })
+  }
 })
 
 // ─── Billing / Track Tickets ───────────────────────────────────────────────
@@ -1361,6 +1386,22 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
   } finally {
     if (client) client.release()
   }
+})
+
+// ─── Activity Log ──────────────────────────────────────────────────────────
+
+app.get('/api/activity-log', requireAuth, async (req, res) => {
+  const { limit = 200, username, action } = req.query
+  const conds = [], vals = []
+  if (username) { vals.push(username); conds.push(`username = $${vals.length}`) }
+  if (action)   { vals.push(`%${action}%`); conds.push(`action ILIKE $${vals.length}`) }
+  vals.push(Math.min(parseInt(limit) || 200, 1000))
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+  const { rows } = await query(
+    `SELECT * FROM activity_log ${where} ORDER BY created_at DESC LIMIT $${vals.length}`,
+    vals
+  )
+  res.json(rows)
 })
 
 // ─── Frontend (production) ─────────────────────────────────────────────────

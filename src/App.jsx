@@ -17,6 +17,8 @@ import ErrorBoundary from './components/shared/ErrorBoundary'
 import SettingsPage from './components/settings/SettingsPage'
 import UsersPage from './components/users/UsersPage'
 import BillingPage from './components/billing/BillingPage'
+import IngredientsPage from './components/ingredients/IngredientsPage'
+import ActivityLog from './components/activity/ActivityLog'
 
 function Guarded({ children }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
@@ -54,15 +56,17 @@ export default function App() {
           <Route path="spec-orders"  element={<Guarded><SpecialOrders /></Guarded>} />
           <Route path="inventory"  element={<Guarded><InventoryGrid /></Guarded>} />
           <Route path="products"   element={<Guarded><ProductsList /></Guarded>} />
-          <Route path="recipes"    element={<Guarded><RecipeGrid /></Guarded>} />
-          <Route path="recipe-gen" element={<Guarded><RecipeGenerator /></Guarded>} />
+          <Route path="recipes"      element={<Guarded><RecipeGrid /></Guarded>} />
+          <Route path="recipe-gen"   element={<Guarded><RecipeGenerator /></Guarded>} />
+          <Route path="ingredients"  element={<Guarded><IngredientsPage /></Guarded>} />
           <Route path="accounts"   element={<Guarded><AccountsList /></Guarded>} />
           <Route path="pricing"    element={<Guarded><PriceGrid /></Guarded>} />
           <Route path="baking"     element={<Guarded><BakeSchedule /></Guarded>} />
           <Route path="billing"    element={<Guarded><BillingPage /></Guarded>} />
           <Route path="import"     element={<Guarded><ImportExport /></Guarded>} />
-          <Route path="users"      element={<Guarded><UsersPage /></Guarded>} />
-          <Route path="settings"   element={<Guarded><SettingsPage /></Guarded>} />
+          <Route path="users"        element={<Guarded><UsersPage /></Guarded>} />
+          <Route path="activity"    element={<Guarded><ActivityLog /></Guarded>} />
+          <Route path="settings"    element={<Guarded><SettingsPage /></Guarded>} />
         </Route>
       </Routes>
     </BrowserRouter>

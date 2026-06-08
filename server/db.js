@@ -65,6 +65,24 @@ async function initDB() {
     console.log('Applied: track_tix table')
   }
 
+  // Activity log table
+  const { rows: logCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='activity_log' LIMIT 1`)
+  if (!logCheck.length) {
+    await pool.query(`
+      CREATE TABLE activity_log (
+        id         SERIAL PRIMARY KEY,
+        username   TEXT,
+        action     TEXT NOT NULL,
+        details    TEXT,
+        ip         TEXT,
+        created_at TIMESTAMPTZ DEFAULT NOW()
+      )
+    `)
+    await pool.query(`CREATE INDEX idx_activity_log_created  ON activity_log(created_at DESC)`)
+    await pool.query(`CREATE INDEX idx_activity_log_username ON activity_log(username)`)
+    console.log('Applied: activity_log table')
+  }
+
   console.log('Database ready')
 }
 

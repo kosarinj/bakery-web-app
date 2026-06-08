@@ -7,14 +7,16 @@ const NAV_ITEMS = [
   { to: '/spec-orders',label: 'Special Orders' },
   { to: '/inventory',  label: 'Inventory' },
   { to: '/products',   label: 'Products' },
-  { to: '/recipes',    label: 'Recipes' },
-  { to: '/recipe-gen', label: 'Recipe Gen' },
+  { to: '/recipes',      label: 'Recipes' },
+  { to: '/recipe-gen',   label: 'Recipe Gen' },
+  { to: '/ingredients',  label: 'Ingredients' },
   { to: '/accounts',   label: 'Accounts' },
   { to: '/pricing',    label: 'Pricing' },
   { to: '/baking',     label: 'Bake List' },
   { to: '/billing',    label: 'Billing' },
   { to: '/import',     label: 'Import/Export' },
   { to: '/users',      label: 'Users' },
+  { to: '/activity',   label: 'Activity' },
   { to: '/settings',   label: 'Settings' },
 ]
 
@@ -64,10 +66,7 @@ export default function Layout({ user, setUser }) {
       {/* ── Top header row ── */}
       <header className="app-header">
         <div className="brand">
-          {logoUrl
-            ? <img src={logoUrl} alt="logo" style={{ height: 34, width: 'auto', objectFit: 'contain', borderRadius: 4 }} onError={e => e.target.style.display = 'none'} />
-            : <span style={{ fontSize: 24 }}>🥖</span>
-          }
+          <img src={logoUrl || '/logo.jpg'} alt="logo" style={{ height: 34, width: 'auto', objectFit: 'contain', borderRadius: 4 }} onError={e => e.target.style.display = 'none'} />
           <span className="brand-name">{bakeryName}</span>
         </div>
         <div className="header-right">

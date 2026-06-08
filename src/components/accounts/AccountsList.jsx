@@ -253,7 +253,11 @@ export default function AccountsList() {
                     <td style={{textAlign:'center'}}><BoolCell value={a.entire_inv} onChange={v=>save(a.name,'entire_inv',v)}/></td>
                     <td style={{textAlign:'center'}}><BoolCell value={a.wrap_muffins} onChange={v=>save(a.name,'wrap_muffins',v)}/></td>
                     <td style={{textAlign:'center'}}><BoolCell value={a.print_inv} onChange={v=>save(a.name,'print_inv',v)}/></td>
-                    <td style={{fontSize:12,paddingLeft:6}}>{fmtDate(a.next_del)}</td>
+                    <td>
+                      <input type="date" value={a.next_del ? String(a.next_del).slice(0,10) : ''}
+                        onChange={e => save(a.name, 'next_del', e.target.value || null)}
+                        style={{ border: 'none', background: 'transparent', fontSize: 12, color: 'var(--text)', cursor: 'pointer' }} />
+                    </td>
                     <td><EditableCell value={parseFloat(a.marketfee)||0} onSave={v=>save(a.name,'marketfee',v)} type="number" align="right"/></td>
                     <td><EditableCell value={parseFloat(a.gas)||0} onSave={v=>save(a.name,'gas',v)} type="number" align="right"/></td>
                     <td><EditableCell value={parseFloat(a.tolls)||0} onSave={v=>save(a.name,'tolls',v)} type="number" align="right"/></td>
