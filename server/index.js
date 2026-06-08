@@ -18,6 +18,7 @@ const PORT = process.env.PORT || 3002
 app.set('trust proxy', 1)
 app.use(cors({ origin: true, credentials: true }))
 app.use(express.json({ limit: '10mb' }))
+app.use(express.text({ limit: '200mb', type: 'text/csv' }))
 app.use(session({
   store: new PgStore({ pool, createTableIfMissing: true }),
   secret: process.env.SESSION_SECRET || 'bakery-secret-change-me',
@@ -1056,6 +1057,30 @@ const bool = (r, k, d = false) => {
   return ['true','1','yes'].includes(String(v).toLowerCase())
 }
 
+// Parse a CSV string into an array of objects (header row → keys)
+function parseCSV(text) {
+  const lines = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n').split('\n').filter(l => l.trim())
+  if (lines.length < 2) return []
+  function parseLine(line) {
+    const fields = []; let inQuote = false, field = ''
+    for (let i = 0; i < line.length; i++) {
+      const ch = line[i]
+      if (ch === '"') { if (inQuote && line[i+1] === '"') { field += '"'; i++ } else inQuote = !inQuote }
+      else if (ch === ',' && !inQuote) { fields.push(field); field = '' }
+      else field += ch
+    }
+    fields.push(field)
+    return fields
+  }
+  const headers = parseLine(lines[0]).map(h => h.trim())
+  return lines.slice(1).map(line => {
+    const vals = parseLine(line)
+    const obj = {}
+    headers.forEach((h, i) => { obj[h] = vals[i] ?? '' })
+    return obj
+  })
+}
+
 // Parse Access date formats: DD-Mon-YY, DD-Mon-YYYY, or standard ISO
 const MON = {jan:0,feb:1,mar:2,apr:3,may:4,jun:5,jul:6,aug:7,sep:8,oct:9,nov:10,dec:11}
 const parseAccessDate = v => {
@@ -1073,7 +1098,13 @@ const parseAccessDate = v => {
 }
 
 app.post('/api/import/:table', requireAuth, async (req, res) => {
-  const rows = req.body?.rows
+  let rows
+  const ct = req.headers['content-type'] || ''
+  if (ct.includes('text/csv')) {
+    rows = typeof req.body === 'string' ? parseCSV(req.body) : []
+  } else {
+    rows = req.body?.rows
+  }
   if (!Array.isArray(rows) || !rows.length) return res.json({ imported: 0, errors: [] })
 
   // Fast bulk path for large tables

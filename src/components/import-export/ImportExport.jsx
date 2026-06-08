@@ -126,21 +126,21 @@ export default function ImportExport() {
   function handleFileChange(tbl, e) {
     const file = e.target.files[0]
     if (!file) return
+    setBusy(p => ({ ...p, [tbl.key]: true }))
+    setResults(p => ({ ...p, [tbl.key]: null }))
     const reader = new FileReader()
     reader.onload = async ev => {
-      const rows = parseCSV(ev.target.result)
-      if (!rows.length) {
-        setResults(p => ({ ...p, [tbl.key]: { error: 'No data rows found in file' } }))
-        return
-      }
-      setBusy(p => ({ ...p, [tbl.key]: true }))
-      setResults(p => ({ ...p, [tbl.key]: null }))
       try {
+        const csvText = ev.target.result
+        if (!csvText.trim() || csvText.split('\n').filter(l => l.trim()).length < 2) {
+          setResults(p => ({ ...p, [tbl.key]: { error: 'No data rows found in file' } }))
+          return
+        }
         const r = await fetch(`/api/import/${tbl.key}`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+          headers: { 'Content-Type': 'text/csv' },
           credentials: 'include',
-          body: JSON.stringify({ rows })
+          body: csvText
         })
         let data
         const ct = r.headers.get('content-type') || ''
@@ -148,7 +148,7 @@ export default function ImportExport() {
           data = await r.json()
         } else {
           const text = await r.text()
-          throw new Error(`Server returned ${r.status} (not JSON) — check if server is running. First 100 chars: ${text.slice(0,100)}`)
+          throw new Error(`Server error ${r.status} — ${text.slice(0, 120)}`)
         }
         if (!r.ok) throw new Error(data.error)
         setResults(p => ({ ...p, [tbl.key]: data }))
