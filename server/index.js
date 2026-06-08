@@ -1056,7 +1056,7 @@ const parseAccessDate = v => {
 }
 
 app.post('/api/import/:table', requireAuth, async (req, res) => {
-  const { rows } = req.body
+  const rows = req.body?.rows
   if (!Array.isArray(rows) || !rows.length) return res.json({ imported: 0, errors: [] })
 
   // Fast bulk path for large tables
@@ -1277,13 +1277,15 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             const sprod = col(row,'prod_name')
             const sdate = parseAccessDate(col(row,'ordr_dt'))
             if (!sacc || !sprod || !sdate) break
+            const sonum = col(row,'order_num')
             await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sacc])
             await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sprod])
             await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [sprod])
             await client.query(`
-              INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
-              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())`,
-              [sacc, col(row,'location'), sdate,
+              INSERT INTO spec_orders(order_num,account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+              ON CONFLICT DO NOTHING`,
+              [sonum ? parseInt(sonum) : null, sacc, col(row,'location'), sdate,
                parseAccessDate(col(row,'del_date')),
                sprod, num(row,'units'), num(row,'price'),
                col(row,'phone'), col(row,'notes')]
@@ -1402,6 +1404,13 @@ app.get('/api/activity-log', requireAuth, async (req, res) => {
     vals
   )
   res.json(rows)
+})
+
+// ─── Error handler — always return JSON, never HTML ────────────────────────
+// eslint-disable-next-line no-unused-vars
+app.use((err, req, res, next) => {
+  const status = err.status || err.statusCode || 500
+  res.status(status).json({ error: err.message || 'Internal server error' })
 })
 
 // ─── Frontend (production) ─────────────────────────────────────────────────

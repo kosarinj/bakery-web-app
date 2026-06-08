@@ -142,7 +142,14 @@ export default function ImportExport() {
           credentials: 'include',
           body: JSON.stringify({ rows })
         })
-        const data = await r.json()
+        let data
+        const ct = r.headers.get('content-type') || ''
+        if (ct.includes('application/json')) {
+          data = await r.json()
+        } else {
+          const text = await r.text()
+          throw new Error(`Server returned ${r.status} (not JSON) — check if server is running. First 100 chars: ${text.slice(0,100)}`)
+        }
         if (!r.ok) throw new Error(data.error)
         setResults(p => ({ ...p, [tbl.key]: data }))
       } catch (err) {

@@ -174,6 +174,7 @@ CREATE TABLE IF NOT EXISTS spec_orders (
 );
 CREATE INDEX IF NOT EXISTS idx_spec_orders_date    ON spec_orders(ordr_dt);
 CREATE INDEX IF NOT EXISTS idx_spec_orders_account ON spec_orders(account);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_spec_orders_order_num ON spec_orders(order_num) WHERE order_num IS NOT NULL;
 
 -- ─── Migrations: extend recipes table ────────────────────────────────────────
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS recipe_id INTEGER;

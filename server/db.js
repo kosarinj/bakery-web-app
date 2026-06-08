@@ -65,6 +65,9 @@ async function initDB() {
     console.log('Applied: track_tix table')
   }
 
+  // Unique index on spec_orders.order_num (mirrors daily_orders pattern)
+  await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_spec_orders_order_num ON spec_orders(order_num) WHERE order_num IS NOT NULL`)
+
   // Activity log table
   const { rows: logCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='activity_log' LIMIT 1`)
   if (!logCheck.length) {
