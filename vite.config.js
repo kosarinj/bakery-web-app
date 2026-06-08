@@ -1,16 +1,12 @@
 import { defineConfig } from 'vite'
 import react from '@vitejs/plugin-react'
-import { resolve } from 'path'
-
-const mdbBrowserPath = resolve('node_modules/mdb-reader/lib/browser/index.js')
+import { nodePolyfills } from 'vite-plugin-node-polyfills'
 
 export default defineConfig({
-  plugins: [react()],
-  resolve: {
-    alias: {
-      'mdb-reader': mdbBrowserPath,
-    },
-  },
+  plugins: [
+    react(),
+    nodePolyfills({ include: ['buffer', 'stream', 'events', 'util', 'process'] }),
+  ],
   server: {
     port: 5174,
     proxy: {
