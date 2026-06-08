@@ -422,6 +422,7 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 
 // Orders summary: units per product for a given date (for bake list / have-need)
 app.get('/api/dashboard/revenue-history', requireAuth, async (req, res) => {
+  const years = Math.min(Math.max(parseInt(req.query.years) || 5, 1), 30)
   try {
     const { rows } = await query(`
       SELECT
@@ -430,10 +431,10 @@ app.get('/api/dashboard/revenue-history', requireAuth, async (req, res) => {
         SUM(total) AS billed,
         SUM(paid)  AS collected
       FROM track_tix
-      WHERE tix_date >= CURRENT_DATE - INTERVAL '5 years'
+      WHERE tix_date >= CURRENT_DATE - ($1 || ' years')::interval
       GROUP BY 1, 2
       ORDER BY 1
-    `)
+    `, [years])
     res.json(rows)
   } catch (e) { res.status(500).json({ error: e.message }) }
 })

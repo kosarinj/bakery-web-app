@@ -68,6 +68,7 @@ export default function Dashboard() {
   const [topAccounts, setTopAccts]  = useState([])
   const [revHistory, setRevHistory] = useState([])
   const [revView, setRevView]       = useState('monthly') // 'monthly' | 'yearly'
+  const [revYears, setRevYears]     = useState(5)
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -78,16 +79,19 @@ export default function Dashboard() {
       g('/api/dashboard/revenue-trend?days=30'),
       g('/api/dashboard/by-type'),
       g('/api/dashboard/top-accounts'),
-      g('/api/dashboard/revenue-history'),
-    ]).then(([s, cfg, tr, bt, ta, rh]) => {
+    ]).then(([s, cfg, tr, bt, ta]) => {
       if (s)   setStats(s)
       if (cfg) setSettings(cfg)
       if (Array.isArray(tr)) setTrend(tr.map(r => ({ ...r, date: fmtDate(r.date), revenue: parseFloat(r.revenue || 0) })))
       if (Array.isArray(bt)) setByType(bt.map(r => ({ ...r, units: parseFloat(r.units || 0) })))
       if (Array.isArray(ta)) setTopAccts(ta.map(r => ({ ...r, revenue: parseFloat(r.revenue || 0) })))
-      if (Array.isArray(rh)) setRevHistory(rh)
     })
   }, [])
+
+  useEffect(() => {
+    fetch(`/api/dashboard/revenue-history?years=${revYears}`, { credentials: 'include' })
+      .then(r => r.json()).then(rh => { if (Array.isArray(rh)) setRevHistory(rh) }).catch(() => {})
+  }, [revYears])
 
   const revMonthly = useMemo(() => revHistory.map(r => ({
     label: MONTH_LABELS[parseInt(r.month.slice(5, 7)) - 1] + ' ' + r.month.slice(2, 4),
@@ -183,12 +187,20 @@ export default function Dashboard() {
             background: 'var(--surface)', border: '1px solid var(--border)',
             borderRadius: 'var(--radius)', padding: '16px', boxShadow: 'var(--shadow-sm)'
           }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 12, flexWrap: 'wrap' }}>
               <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em', flex: 1 }}>
-                Revenue History — Last 5 Years
+                Revenue History — Last {revYears} Year{revYears !== 1 ? 's' : ''}
               </span>
-              <button className={`btn btn-sm ${revView === 'monthly' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRevView('monthly')}>Monthly</button>
-              <button className={`btn btn-sm ${revView === 'yearly'  ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRevView('yearly')}>Yearly</button>
+              <div style={{ display: 'flex', gap: 4 }}>
+                {[5, 10, 15, 20].map(y => (
+                  <button key={y} className={`btn btn-sm ${revYears === y ? 'btn-primary' : 'btn-secondary'}`}
+                    onClick={() => setRevYears(y)}>{y}yr</button>
+                ))}
+              </div>
+              <div style={{ display: 'flex', gap: 4, borderLeft: '1px solid var(--border)', paddingLeft: 8 }}>
+                <button className={`btn btn-sm ${revView === 'monthly' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRevView('monthly')}>Monthly</button>
+                <button className={`btn btn-sm ${revView === 'yearly'  ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRevView('yearly')}>Yearly</button>
+              </div>
             </div>
             <div style={{ height: 260 }}>
               <ResponsiveContainer width="100%" height="100%">

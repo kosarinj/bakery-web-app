@@ -11,7 +11,11 @@ function MiniCalendar({ dates, selected, onSelect }) {
   const dateMap = useMemo(() => new Map(dates.map(d => [d.date, parseInt(d.count)])), [dates])
 
   const [cal, setCal] = useState(() => {
-    const base = selected || new Date().toISOString().slice(0, 10)
+    // Prefer the selected date if it has orders; otherwise jump to the most recent date with orders
+    const hasOrders = dates.some(d => d.date === selected)
+    const base = (hasOrders && selected)
+      ? selected
+      : (dates[0]?.date || selected || new Date().toISOString().slice(0, 10))
     const d = new Date(base + 'T00:00:00')
     return { year: d.getFullYear(), month: d.getMonth() + 1 }
   })
