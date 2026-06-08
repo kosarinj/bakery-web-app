@@ -156,6 +156,25 @@ CREATE TABLE IF NOT EXISTS track_tix (
 CREATE INDEX IF NOT EXISTS idx_track_tix_date    ON track_tix(tix_date DESC);
 CREATE INDEX IF NOT EXISTS idx_track_tix_account ON track_tix(account);
 
+-- ─── Special Orders ───────────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS spec_orders (
+  id          SERIAL PRIMARY KEY,
+  order_num   INTEGER,
+  account     TEXT REFERENCES accounts(name) ON UPDATE CASCADE,
+  location    TEXT,
+  ordr_dt     DATE NOT NULL,
+  del_date    DATE,
+  prod_name   TEXT REFERENCES products(prod_name) ON UPDATE CASCADE,
+  units       NUMERIC(10,2) DEFAULT 0,
+  price       NUMERIC(10,4) DEFAULT 0,
+  phone       TEXT,
+  notes       TEXT,
+  created_at  TIMESTAMPTZ DEFAULT NOW(),
+  last_update TIMESTAMPTZ DEFAULT NOW()
+);
+CREATE INDEX IF NOT EXISTS idx_spec_orders_date    ON spec_orders(ordr_dt);
+CREATE INDEX IF NOT EXISTS idx_spec_orders_account ON spec_orders(account);
+
 -- ─── Migrations: extend recipes table ────────────────────────────────────────
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS recipe_id INTEGER;
 ALTER TABLE recipes ADD COLUMN IF NOT EXISTS space     BOOLEAN DEFAULT FALSE;

@@ -668,6 +668,74 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
+// ─── Special Orders ────────────────────────────────────────────────────────
+
+app.get('/api/spec-orders', requireAuth, async (req, res) => {
+  const { date, account } = req.query
+  const conds = [], vals = []
+  if (date)    { vals.push(date);    conds.push(`s.ordr_dt = $${vals.length}`) }
+  if (account) { vals.push(account); conds.push(`s.account = $${vals.length}`) }
+  const where = conds.length ? `WHERE ${conds.join(' AND ')}` : ''
+  try {
+    const { rows } = await query(`
+      SELECT s.*, p.prod_type, p.prod_group
+      FROM spec_orders s
+      LEFT JOIN products p ON p.prod_name = s.prod_name
+      ${where}
+      ORDER BY s.ordr_dt, s.account, s.prod_name
+    `, vals)
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/spec-orders', requireAuth, async (req, res) => {
+  const { account, location, ordr_dt, del_date, prod_name, units, price, phone, notes } = req.body
+  try {
+    const { rows } = await query(`
+      INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *
+    `, [account, location, ordr_dt, del_date || null, prod_name, units || 0, price || 0, phone, notes])
+    res.json(rows[0])
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+
+app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
+  const fields = ['account','location','ordr_dt','del_date','prod_name','units','price','phone','notes']
+  const updates = ['last_update=NOW()'], vals = []
+  fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
+  vals.push(req.params.id)
+  try {
+    await query(`UPDATE spec_orders SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)
+    res.json({ success: true })
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+
+app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
+  await query('DELETE FROM spec_orders WHERE id=$1', [req.params.id])
+  res.json({ success: true })
+})
+
+// Copy special orders from one date to another (skip if order already exists for that account+product+date)
+app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
+  const { from_date, to_date, accounts } = req.body
+  if (!from_date || !to_date) return res.status(400).json({ error: 'from_date and to_date required' })
+  const hasAcctFilter = Array.isArray(accounts) && accounts.length > 0
+  try {
+    const { rows } = await query(`
+      INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+      SELECT s.account, s.location, $2::date, s.del_date, s.prod_name, s.units, s.price, s.phone, s.notes, NOW()
+      FROM spec_orders s
+      WHERE s.ordr_dt = $1
+        ${hasAcctFilter ? 'AND s.account = ANY($3::text[])' : ''}
+        AND NOT EXISTS (
+          SELECT 1 FROM spec_orders e WHERE e.account=s.account AND e.prod_name=s.prod_name AND e.ordr_dt=$2::date
+        )
+      RETURNING *
+    `, hasAcctFilter ? [from_date, to_date, accounts] : [from_date, to_date])
+    res.json({ copied: rows.length, rows })
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+
 // ─── Billing / Track Tickets ───────────────────────────────────────────────
 
 // Generate bills for a delivery date — creates/updates track_tix from orders
@@ -912,6 +980,8 @@ const EXPORTS = {
                    ['account','prod_name','whole_price','ret_price']],
   ingredients:    ['SELECT ingr_id,name,unit,cost_cup,cost_pound,cup_pound,notes FROM ingredients ORDER BY name',
                    ['ingr_id','name','unit','cost_cup','cost_pound','cup_pound','notes']],
+  spec_orders:    [`SELECT order_num,account,location,ordr_dt,del_date,prod_name,units,price,phone,notes FROM spec_orders ORDER BY ordr_dt,account`,
+                   ['order_num','account','location','ordr_dt','del_date','prod_name','units','price','phone','notes']],
   track_tix:      [`SELECT t.id,t.tix_date,t.account,t.total,t.paid,(t.total-t.paid) AS outstanding,t.notes,t.last_update
                    FROM track_tix t ORDER BY t.tix_date DESC, t.account`,
                    ['id','tix_date','account','total','paid','outstanding','notes','last_update']],
@@ -1174,6 +1244,24 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
                col(row,'cost_pound') ? num(row,'cost_pound') : null,
                col(row,'cup_pound') ? num(row,'cup_pound') : null,
                col(row,'notes')]
+            )
+            break
+          }
+          case 'spec_orders': {
+            const sacc  = col(row,'account') || col(row,'cust')
+            const sprod = col(row,'prod_name')
+            const sdate = parseAccessDate(col(row,'ordr_dt'))
+            if (!sacc || !sprod || !sdate) break
+            await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sacc])
+            await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sprod])
+            await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [sprod])
+            await client.query(`
+              INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW())`,
+              [sacc, col(row,'location'), sdate,
+               parseAccessDate(col(row,'del_date')),
+               sprod, num(row,'units'), num(row,'price'),
+               col(row,'phone'), col(row,'notes')]
             )
             break
           }

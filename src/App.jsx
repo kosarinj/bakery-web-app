@@ -6,6 +6,7 @@ import OrdersGrid from './components/orders/OrdersGrid'
 import InventoryGrid from './components/inventory/InventoryGrid'
 import ProductsList from './components/products/ProductsList'
 import RecipeGrid from './components/recipes/RecipeGrid'
+import SpecialOrders from './components/orders/SpecialOrders'
 import RecipeGenerator from './components/recipes/RecipeGenerator'
 import AccountsList from './components/accounts/AccountsList'
 import PriceGrid from './components/pricing/PriceGrid'
@@ -49,7 +50,8 @@ export default function App() {
           element={user ? <Layout user={user} setUser={setUser} /> : <Navigate to="/login" replace />}
         >
           <Route index element={<Guarded><Dashboard /></Guarded>} />
-          <Route path="orders"     element={<Guarded><OrdersGrid /></Guarded>} />
+          <Route path="orders"       element={<Guarded><OrdersGrid /></Guarded>} />
+          <Route path="spec-orders"  element={<Guarded><SpecialOrders /></Guarded>} />
           <Route path="inventory"  element={<Guarded><InventoryGrid /></Guarded>} />
           <Route path="products"   element={<Guarded><ProductsList /></Guarded>} />
           <Route path="recipes"    element={<Guarded><RecipeGrid /></Guarded>} />

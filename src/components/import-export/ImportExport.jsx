@@ -47,6 +47,13 @@ const TABLES = [
     cols: 'prod_name, units, sod_inv, location',
   },
   {
+    key: 'spec_orders',
+    label: 'Special Orders',
+    desc: 'Historical special/custom orders',
+    cols: 'order_num, account, location, ordr_dt, del_date, prod_name, units, price, phone, notes',
+    note: 'Import before Track Tickets; products/accounts auto-created if missing',
+  },
+  {
     key: 'track_tix',
     label: 'Track Tickets',
     desc: 'Historical billing and payment records',

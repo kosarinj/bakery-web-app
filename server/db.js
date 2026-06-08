@@ -24,13 +24,14 @@ const schema = readFileSync(join(__dirname, '../db/schema.sql'), 'utf8')
 
 async function initDB() {
   // Check which migrations are already applied
-  const [{ rows: baseCheck }, { rows: recipeCheck }, { rows: tixCheck }] = await Promise.all([
+  const [{ rows: baseCheck }, { rows: recipeCheck }, { rows: tixCheck }, { rows: specCheck }] = await Promise.all([
     pool.query(`SELECT 1 FROM information_schema.columns WHERE table_name='accounts' AND column_name='adj_level' LIMIT 1`),
     pool.query(`SELECT 1 FROM information_schema.columns WHERE table_name='recipes' AND column_name='recipe_id' LIMIT 1`),
     pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='track_tix' LIMIT 1`),
+    pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='spec_orders' LIMIT 1`),
   ])
 
-  if (!baseCheck.length) {
+  if (!baseCheck.length || !specCheck.length) {
     // Fresh database — run full schema
     await pool.query(schema)
     console.log('Database initialized')
