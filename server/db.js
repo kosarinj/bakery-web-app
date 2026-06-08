@@ -86,6 +86,26 @@ async function initDB() {
     console.log('Applied: activity_log table')
   }
 
+  // Mark stub accounts inactive: those created by historical imports with no route/acctgrp/balance data
+  // Uses ON CONFLICT DO NOTHING trick — just sets active=false for bare stubs
+  const { rowCount } = await pool.query(`
+    UPDATE accounts SET active = false
+    WHERE active = true
+      AND route IS NULL
+      AND sequence = 0
+      AND (acctgrp IS NULL OR acctgrp = '')
+      AND balance = 0
+      AND marketfee = 0
+      AND (notes IS NULL OR notes = '')
+      AND NOT EXISTS (
+        SELECT 1 FROM daily_orders WHERE account = accounts.name LIMIT 1
+      )
+      AND NOT EXISTS (
+        SELECT 1 FROM track_tix WHERE account = accounts.name LIMIT 1
+      )
+  `)
+  if (rowCount > 0) console.log(`Marked ${rowCount} stub accounts inactive`)
+
   console.log('Database ready')
 }
 

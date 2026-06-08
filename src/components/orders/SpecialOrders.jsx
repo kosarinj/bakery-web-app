@@ -12,6 +12,7 @@ export default function SpecialOrders() {
   const [error, setError]       = useState('')
   const [newRow, setNewRow]     = useState(EMPTY)
   const [adding, setAdding]     = useState(false)
+  const [dates, setDates]       = useState([])
 
   // Copy/repeat state
   const [copyFrom, setCopyFrom]   = useState('')
@@ -32,9 +33,11 @@ export default function SpecialOrders() {
     Promise.all([
       fetch('/api/accounts', { credentials: 'include' }).then(r => r.json()),
       fetch('/api/products', { credentials: 'include' }).then(r => r.json()),
-    ]).then(([a, p]) => {
+      fetch('/api/spec-orders/dates', { credentials: 'include' }).then(r => r.json()),
+    ]).then(([a, p, d]) => {
       setAccounts(Array.isArray(a) ? a : [])
       setProducts(Array.isArray(p) ? p : [])
+      setDates(Array.isArray(d) ? d : [])
     })
   }, [])
 
@@ -98,10 +101,44 @@ export default function SpecialOrders() {
   const totalUnits = orders.reduce((s, o) => s + (parseFloat(o.units) || 0), 0)
   const totalRev   = orders.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
 
+  const [showDatePanel, setShowDatePanel] = useState(false)
+
   return (
     <div>
       <div className="page-toolbar" style={{ marginBottom: 8 }}>
         <label>Date: <input type="date" value={date} onChange={e => setDate(e.target.value)} /></label>
+        {dates.length > 0 && (
+          <div style={{ position: 'relative' }}>
+            <button className="btn btn-secondary btn-sm" onClick={() => setShowDatePanel(p => !p)}>
+              Browse Dates ({dates.length})
+            </button>
+            {showDatePanel && (
+              <div style={{
+                position: 'absolute', top: '100%', left: 0, zIndex: 100, marginTop: 4,
+                background: 'var(--surface)', border: '1px solid var(--border)',
+                borderRadius: 'var(--radius)', boxShadow: '0 4px 16px rgba(0,0,0,0.12)',
+                minWidth: 200, maxHeight: 320, overflowY: 'auto',
+              }}>
+                {dates.map(d => (
+                  <button key={d.date} onClick={() => { setDate(d.date); setShowDatePanel(false) }}
+                    style={{
+                      display: 'block', width: '100%', textAlign: 'left',
+                      padding: '7px 14px', border: 'none', background: d.date === date ? 'var(--primary-light)' : 'transparent',
+                      color: d.date === date ? 'var(--primary)' : 'var(--text)',
+                      fontWeight: d.date === date ? 700 : 400,
+                      fontSize: 13, cursor: 'pointer',
+                    }}
+                    onMouseEnter={e => { if (d.date !== date) e.currentTarget.style.background = 'var(--bg)' }}
+                    onMouseLeave={e => { if (d.date !== date) e.currentTarget.style.background = 'transparent' }}
+                  >
+                    {d.date}
+                    <span style={{ float: 'right', color: 'var(--text-muted)', fontSize: 11 }}>{d.count} orders</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         <span className="toolbar-info">{orders.length} orders · {totalUnits} units · ${totalRev.toFixed(2)}</span>
         <div className="toolbar-spacer" />
         {!adding && <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add Special Order</button>}
@@ -211,7 +248,8 @@ export default function SpecialOrders() {
 
               {orders.length === 0 && !adding && (
                 <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
-                  No special orders for {date}. Click "+ Add Special Order" to add one.
+                  No special orders for {date}.
+                  {dates.length > 0 && <span> Use <strong>Browse Dates</strong> to jump to a date with orders.</span>}
                 </td></tr>
               )}
 

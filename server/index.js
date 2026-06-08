@@ -709,6 +709,15 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
 
 // ─── Special Orders ────────────────────────────────────────────────────────
 
+app.get('/api/spec-orders/dates', requireAuth, async (req, res) => {
+  const { rows } = await query(`
+    SELECT ordr_dt::text AS date, COUNT(*) AS count
+    FROM spec_orders
+    GROUP BY ordr_dt ORDER BY ordr_dt DESC
+  `)
+  res.json(rows)
+})
+
 app.get('/api/spec-orders', requireAuth, async (req, res) => {
   const { date, account } = req.query
   const conds = [], vals = []
@@ -1113,10 +1122,10 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
       const norm = rows.map(r =>
         Object.fromEntries(Object.entries(r).map(([k, v]) => [k.trim().toLowerCase(), v?.toString().trim() ?? '']))
       )
-      // Bulk create missing account stubs
+      // Bulk create missing account stubs (inactive so they don't inflate the active count)
       const uniqueAccts = [...new Set(norm.map(r => col(r,'account')).filter(Boolean))]
       if (uniqueAccts.length) {
-        const placeholders = uniqueAccts.map((_, i) => `($${i + 1}, true)`).join(',')
+        const placeholders = uniqueAccts.map((_, i) => `($${i + 1}, false)`).join(',')
         await query(`INSERT INTO accounts(name,active) VALUES ${placeholders} ON CONFLICT DO NOTHING`, uniqueAccts)
       }
       // Deduplicate by (tix_date, account) — keep last occurrence
@@ -1180,11 +1189,11 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
 
       if (!valid.length) return res.json({ imported: 0, errors: [{ error: 'No valid rows (missing account, prod_name, or ordr_dt)', row: {} }] })
 
-      // Bulk-create missing account and product stubs
+      // Bulk-create missing account and product stubs (inactive so they don't inflate the active count)
       const uniqueAccts = [...new Set(valid.map(r => r.sacc))]
       const uniqueProds = [...new Set(valid.map(r => r.sprod))]
       if (uniqueAccts.length) {
-        const ph = uniqueAccts.map((_, i) => `($${i+1},true)`).join(',')
+        const ph = uniqueAccts.map((_, i) => `($${i+1},false)`).join(',')
         await query(`INSERT INTO accounts(name,active) VALUES ${ph} ON CONFLICT DO NOTHING`, uniqueAccts)
       }
       if (uniqueProds.length) {
@@ -1388,7 +1397,7 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             const sdate = parseAccessDate(col(row,'ordr_dt'))
             if (!sacc || !sprod || !sdate) break
             const sonum = col(row,'order_num')
-            await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sacc])
+            await client.query(`INSERT INTO accounts(name,active) VALUES($1,false) ON CONFLICT DO NOTHING`, [sacc])
             await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sprod])
             await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [sprod])
             await client.query(`
@@ -1406,8 +1415,8 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             const tacc  = col(row,'account')
             const tdate = parseAccessDate(col(row,'date') || col(row,'tix_date'))
             if (!tacc || !tdate) break
-            // Auto-create account stub if needed
-            await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [tacc])
+            // Auto-create account stub if needed (inactive to avoid inflating active count)
+            await client.query(`INSERT INTO accounts(name,active) VALUES($1,false) ON CONFLICT DO NOTHING`, [tacc])
             await client.query(`
               INSERT INTO track_tix(tix_date,account,total,paid,last_update)
               VALUES($1,$2,$3,$4,$5)
@@ -1426,7 +1435,7 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             // Auto-create stubs if missing
             await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [pname])
             await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [pname])
-            await client.query(`INSERT INTO accounts(name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [aname])
+            await client.query(`INSERT INTO accounts(name,active) VALUES($1,false) ON CONFLICT DO NOTHING`, [aname])
             const onum = col(row,'order_num')
             await client.query(
               `INSERT INTO daily_orders(order_num,account,ordr_dt,prod_name,units,wprice,rprice,del_date,special_ords,postbake_adj,last_update)
