@@ -1,4 +1,5 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef } from 'react'
+import MDBReader from 'mdb-reader'
 
 const TABLES = [
   {
@@ -108,90 +109,138 @@ function triggerDownload(filename, content) {
   URL.revokeObjectURL(url)
 }
 
-const DEFAULT_MDB_PATH = 'C:/Users/jeffk/Documents/recipe.mdb'
-const LS_KEY = 'access_mdb_path'
+// Which MDB tables to read for each import key, and their display label
+const MDB_TABLE_MAP = {
+  accounts:       { mdbNames: ['Account'],                           label: 'Accounts'       },
+  products:       { mdbNames: ['Product'],                           label: 'Products'       },
+  prices:         { mdbNames: ['Price'],                             label: 'Prices'         },
+  account_prices: { mdbNames: ['Account_price'],                     label: 'Account Prices' },
+  ingredients:    { mdbNames: ['ingredients'],                       label: 'Ingredients'    },
+  recipes:        { mdbNames: ['new_recipe'],                        label: 'Recipes'        },
+  inventory:      { mdbNames: ['Inventory'],                         label: 'Inventory'      },
+  spec_orders:    { mdbNames: ['spec_ord'],                          label: 'Special Orders' },
+  track_tix:      { mdbNames: ['Track_tix', 'Track_tix_20201215'],   label: 'Track Tickets'  },
+}
+
+function rowsToCSV(rows) {
+  if (!rows.length) return ''
+  const headers = Object.keys(rows[0])
+  const esc = v => {
+    if (v == null) return ''
+    const s = v instanceof Date ? v.toISOString() : String(v)
+    return (s.includes(',') || s.includes('"') || s.includes('\n'))
+      ? '"' + s.replace(/"/g, '""') + '"'
+      : s
+  }
+  return [headers.join(','), ...rows.map(r => headers.map(h => esc(r[h])).join(','))].join('\n')
+}
 
 function AccessDBPanel() {
-  const [path, setPath]       = useState(() => localStorage.getItem(LS_KEY) || DEFAULT_MDB_PATH)
-  const [info, setInfo]       = useState(null)   // { ok, tables, error }
-  const [scanning, setScanning] = useState(false)
+  const fileRef = useRef(null)
+  const [db, setDb]           = useState(null)
+  const [fileName, setFileName] = useState('')
+  const [loading, setLoading] = useState(false)
+  const [loadMsg, setLoadMsg] = useState('')
+  const [tableInfo, setTableInfo] = useState([])
   const [busy, setBusy]       = useState({})
   const [results, setResults] = useState({})
 
-  async function scan() {
-    setScanning(true); setInfo(null)
+  async function handleFile(e) {
+    const file = e.target.files[0]
+    if (!file) return
+    setLoading(true); setLoadMsg('Reading file…'); setDb(null); setTableInfo([]); setResults({})
     try {
-      const r = await fetch(`/api/access/info?path=${encodeURIComponent(path)}`, { credentials: 'include' })
-      const d = await r.json()
-      setInfo(d)
-      if (d.ok) localStorage.setItem(LS_KEY, path)
-    } catch (e) {
-      setInfo({ ok: false, error: e.message })
-    } finally { setScanning(false) }
+      const buf = await file.arrayBuffer()
+      setLoadMsg('Parsing database…')
+      const mdb = new MDBReader(buf)
+      const nameMap = new Map(mdb.getTableNames().map(t => [t.toLowerCase(), t]))
+      const info = Object.entries(MDB_TABLE_MAP).map(([key, cfg]) => {
+        let totalRows = 0, found = false
+        cfg.mdbNames.forEach(n => {
+          const real = nameMap.get(n.toLowerCase())
+          if (real) { found = true; totalRows += mdb.getTable(real).rowCount ?? 0 }
+        })
+        return { key, label: cfg.label, found, rows: totalRows }
+      })
+      setDb(mdb)
+      setFileName(file.name)
+      setTableInfo(info)
+      setLoadMsg('')
+    } catch (err) {
+      setLoadMsg('Error: ' + err.message)
+    } finally { setLoading(false) }
   }
 
   async function importTable(key) {
+    if (!db) return
+    const cfg = MDB_TABLE_MAP[key]
     setBusy(p => ({ ...p, [key]: true }))
     setResults(p => ({ ...p, [key]: null }))
     try {
-      const r = await fetch(`/api/access/import/${key}?path=${encodeURIComponent(path)}`, {
-        method: 'POST', credentials: 'include',
+      // Collect rows from all MDB source tables for this key (combines Track_tix tables, etc.)
+      const nameMap = new Map(db.getTableNames().map(t => [t.toLowerCase(), t]))
+      const allRows = []
+      cfg.mdbNames.forEach(n => {
+        const real = nameMap.get(n.toLowerCase())
+        if (real) allRows.push(...db.getTable(real).getData())
+      })
+      const csv = rowsToCSV(allRows)
+      const r = await fetch(`/api/access/import-rows/${key}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'text/csv' },
+        credentials: 'include',
+        body: csv,
       })
       const d = await r.json()
+      if (!r.ok) throw new Error(d.error)
       setResults(p => ({ ...p, [key]: d }))
-    } catch (e) {
-      setResults(p => ({ ...p, [key]: { error: e.message } }))
+    } catch (err) {
+      setResults(p => ({ ...p, [key]: { error: err.message } }))
     } finally {
       setBusy(p => ({ ...p, [key]: false }))
     }
   }
 
   async function importAll() {
-    if (!info?.tables) return
-    for (const t of info.tables.filter(t => t.found)) {
+    for (const t of tableInfo.filter(t => t.found)) {
       await importTable(t.key)
     }
   }
 
-  const allBusy = info?.tables?.some(t => busy[t.key])
+  const anyBusy = Object.values(busy).some(Boolean)
 
   return (
     <div style={{ marginBottom: 28 }}>
-      <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 10, letterSpacing: '-0.01em' }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 4, letterSpacing: '-0.01em' }}>
         Import from Access Database
-        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
-          (local server only — file is read directly from disk, never uploaded)
-        </span>
       </h3>
+      <p style={{ fontSize: 12, color: 'var(--text-muted)', marginBottom: 10 }}>
+        Your browser reads the .mdb file locally — the file itself is never uploaded.
+        Only the extracted table data is sent to the server.
+      </p>
 
-      {/* Path row */}
-      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
-        <input value={path} onChange={e => setPath(e.target.value)}
-          style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'monospace', color: 'var(--text)', background: 'var(--surface)' }}
-          placeholder="C:/path/to/recipe.mdb"
-          onKeyDown={e => e.key === 'Enter' && scan()}
-        />
-        <button className="btn btn-secondary btn-sm" onClick={scan} disabled={scanning}>
-          {scanning ? 'Scanning…' : 'Connect'}
+      {/* File picker */}
+      <div style={{ display: 'flex', gap: 8, alignItems: 'center', marginBottom: 12 }}>
+        <button className="btn btn-secondary btn-sm" onClick={() => fileRef.current?.click()} disabled={loading}>
+          {loading ? loadMsg : (db ? '↺ Choose different file' : 'Choose .mdb file')}
         </button>
+        {fileName && !loading && (
+          <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{fileName}</span>
+        )}
+        {loading && <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>{loadMsg}</span>}
+        <input ref={fileRef} type="file" accept=".mdb,.accdb" style={{ display: 'none' }} onChange={handleFile} />
       </div>
 
-      {/* Status */}
-      {info && !info.ok && (
-        <div style={{ color: 'var(--error)', fontSize: 13, marginBottom: 10 }}>
-          ✕ {info.error}
-        </div>
-      )}
-
-      {info?.ok && (
+      {/* Table grid */}
+      {tableInfo.length > 0 && (
         <div className="section-card" style={{ padding: 0 }}>
           <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
             <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>
-              ✓ Connected — {info.tableCount} tables found
+              ✓ {fileName} — {tableInfo.filter(t => t.found).length} importable tables found
             </span>
             <div style={{ flex: 1 }} />
-            <button className="btn btn-primary btn-sm" onClick={importAll} disabled={allBusy}>
-              {allBusy ? 'Importing…' : '↑ Import All'}
+            <button className="btn btn-primary btn-sm" onClick={importAll} disabled={anyBusy}>
+              {anyBusy ? 'Importing…' : '↑ Import All'}
             </button>
           </div>
 
@@ -200,13 +249,13 @@ function AccessDBPanel() {
               <tr>
                 <th>Table</th>
                 <th style={{ textAlign: 'right' }}>Rows in Access</th>
-                <th style={{ minWidth: 160 }}>Action</th>
+                <th style={{ minWidth: 140 }}>Action</th>
                 <th style={{ minWidth: 180 }}>Result</th>
               </tr>
             </thead>
             <tbody>
-              {info.tables.map(t => {
-                const res = results[t.key]
+              {tableInfo.map(t => {
+                const res    = results[t.key]
                 const isBusy = busy[t.key]
                 return (
                   <tr key={t.key} style={{ opacity: t.found ? 1 : 0.4 }}>
@@ -215,7 +264,7 @@ function AccessDBPanel() {
                       {!t.found && <div style={{ fontSize: 11, color: 'var(--error)' }}>Not found in this file</div>}
                     </td>
                     <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
-                      {t.found ? Number(t.rows).toLocaleString() : '—'}
+                      {t.found ? t.rows.toLocaleString() : '—'}
                     </td>
                     <td>
                       <button className="btn btn-primary btn-sm" disabled={!t.found || isBusy}
