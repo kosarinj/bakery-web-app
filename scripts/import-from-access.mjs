@@ -43,7 +43,7 @@ const q = (text, params) => pool.query(text, params)
 
 // ── Open MDB ──────────────────────────────────────────────────────────────────
 console.log(`\nReading ${MDB_PATH} ...`)
-const db  = openMDB(MDB_PATH)
+const db  = await openMDB(MDB_PATH)
 const tbl = makeTableGetter(db)
 console.log(`  Found ${db.getTableNames().length} tables\n`)
 

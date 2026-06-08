@@ -3,7 +3,6 @@
  * Used by both the local CLI script and the /api/access/* HTTP endpoints.
  */
 
-import MDBReader from 'mdb-reader'
 import { readFileSync, existsSync } from 'fs'
 
 // ── Helpers ───────────────────────────────────────────────────────────────────
@@ -18,9 +17,10 @@ export const midate = v => {
 export const mordnum = v => { const n = parseInt(v); return (!n || n === 0) ? null : n }
 
 // ── Open an MDB file ──────────────────────────────────────────────────────────
-export function openMDB(filePath) {
+export async function openMDB(filePath) {
   if (!existsSync(filePath)) throw new Error(`File not found: ${filePath}`)
   const buf = readFileSync(filePath)
+  const { default: MDBReader } = await import('mdb-reader')
   return new MDBReader(buf)
 }
 

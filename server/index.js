@@ -1534,7 +1534,7 @@ app.get('/api/access/info', requireAuth, async (req, res) => {
   const filePath = req.query.path
   if (!filePath) return res.status(400).json({ error: 'path query param required' })
   try {
-    const db     = openMDB(filePath)          // throws if file not found
+    const db     = await openMDB(filePath)     // throws if file not found
     const tables = getTableInfo(db)
     res.json({ ok: true, tableCount: db.getTableNames().length, tables })
   } catch (e) {
@@ -1542,7 +1542,7 @@ app.get('/api/access/info', requireAuth, async (req, res) => {
   }
 })
 
-// POST /api/access/import/:table?path=... — import one table
+// POST /api/access/import/:table?path=... — import one table (local server only)
 app.post('/api/access/import/:table', requireAuth, async (req, res) => {
   const { table } = req.params
   const filePath  = req.query.path
@@ -1550,10 +1550,30 @@ app.post('/api/access/import/:table', requireAuth, async (req, res) => {
   const importer  = IMPORTERS[table]
   if (!importer)  return res.status(400).json({ error: `Unknown table: ${table}` })
   try {
-    const db  = openMDB(filePath)
+    const db  = await openMDB(filePath)
     const tbl = makeTableGetter(db)
     const n   = await importer(tbl, query)
     await logActivity(req, 'access_import', `Imported ${n} rows into ${table} from ${filePath}`)
+    res.json({ imported: n, table })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// POST /api/access/import-rows/:table — browser sends raw MDB rows as CSV; server transforms + inserts
+// The CSV uses original MDB column names so the server importers can apply their own field mapping.
+app.post('/api/access/import-rows/:table', requireAuth, async (req, res) => {
+  const { table } = req.params
+  const importer  = IMPORTERS[table]
+  if (!importer) return res.status(400).json({ error: `Unknown table: ${table}` })
+  const ct = req.headers['content-type'] || ''
+  if (!ct.includes('text/csv')) return res.status(400).json({ error: 'Expected text/csv body' })
+  try {
+    const rows = parseCSV(req.body)
+    // Fake tbl() — returns the provided rows regardless of which MDB table name is requested
+    const fakeTbl = () => rows
+    const n = await importer(fakeTbl, query)
+    await logActivity(req, 'access_import_browser', `Browser-imported ${n} rows into ${table}`)
     res.json({ imported: n, table })
   } catch (e) {
     res.status(500).json({ error: e.message })

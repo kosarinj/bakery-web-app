@@ -1,5 +1,4 @@
 import { useState, useRef } from 'react'
-import MDBReader from 'mdb-reader'
 
 const TABLES = [
   {
@@ -152,6 +151,7 @@ function AccessDBPanel() {
     try {
       const buf = await file.arrayBuffer()
       setLoadMsg('Parsing database…')
+      const { default: MDBReader } = await import('mdb-reader')
       const mdb = new MDBReader(buf)
       const nameMap = new Map(mdb.getTableNames().map(t => [t.toLowerCase(), t]))
       const info = Object.entries(MDB_TABLE_MAP).map(([key, cfg]) => {
