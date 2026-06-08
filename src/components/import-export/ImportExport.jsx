@@ -213,7 +213,7 @@ function AccessDBPanel() {
             const d = await r.json()
             if (!r.ok) throw new Error(d.error)
             totalImported += d.imported
-            setResults(p => ({ ...p, [key]: { progress: true, imported: totalImported, total: totalRows } }))
+            setResults(p => ({ ...p, [key]: { progress: true, imported: totalImported } }))
           }
         }
         setResults(p => ({ ...p, [key]: { imported: totalImported } }))
@@ -323,7 +323,7 @@ function AccessDBPanel() {
                           ? <span style={{ color: 'var(--error)', fontSize: 12 }}>✕ {res.error}</span>
                           : res.progress
                             ? <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                {res.imported?.toLocaleString()} / {res.total?.toLocaleString()} rows…
+                                {res.imported?.toLocaleString()} rows…
                               </span>
                             : <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
                                 ✓ {res.imported?.toLocaleString()} rows
