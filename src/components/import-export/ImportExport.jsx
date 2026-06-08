@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 
 const TABLES = [
   {
@@ -108,6 +108,141 @@ function triggerDownload(filename, content) {
   URL.revokeObjectURL(url)
 }
 
+const DEFAULT_MDB_PATH = 'C:/Users/jeffk/Documents/recipe.mdb'
+const LS_KEY = 'access_mdb_path'
+
+function AccessDBPanel() {
+  const [path, setPath]       = useState(() => localStorage.getItem(LS_KEY) || DEFAULT_MDB_PATH)
+  const [info, setInfo]       = useState(null)   // { ok, tables, error }
+  const [scanning, setScanning] = useState(false)
+  const [busy, setBusy]       = useState({})
+  const [results, setResults] = useState({})
+
+  async function scan() {
+    setScanning(true); setInfo(null)
+    try {
+      const r = await fetch(`/api/access/info?path=${encodeURIComponent(path)}`, { credentials: 'include' })
+      const d = await r.json()
+      setInfo(d)
+      if (d.ok) localStorage.setItem(LS_KEY, path)
+    } catch (e) {
+      setInfo({ ok: false, error: e.message })
+    } finally { setScanning(false) }
+  }
+
+  async function importTable(key) {
+    setBusy(p => ({ ...p, [key]: true }))
+    setResults(p => ({ ...p, [key]: null }))
+    try {
+      const r = await fetch(`/api/access/import/${key}?path=${encodeURIComponent(path)}`, {
+        method: 'POST', credentials: 'include',
+      })
+      const d = await r.json()
+      setResults(p => ({ ...p, [key]: d }))
+    } catch (e) {
+      setResults(p => ({ ...p, [key]: { error: e.message } }))
+    } finally {
+      setBusy(p => ({ ...p, [key]: false }))
+    }
+  }
+
+  async function importAll() {
+    if (!info?.tables) return
+    for (const t of info.tables.filter(t => t.found)) {
+      await importTable(t.key)
+    }
+  }
+
+  const allBusy = info?.tables?.some(t => busy[t.key])
+
+  return (
+    <div style={{ marginBottom: 28 }}>
+      <h3 style={{ fontSize: 14, fontWeight: 700, color: 'var(--text)', marginBottom: 10, letterSpacing: '-0.01em' }}>
+        Import from Access Database
+        <span style={{ marginLeft: 8, fontSize: 11, fontWeight: 400, color: 'var(--text-muted)' }}>
+          (local server only — file is read directly from disk, never uploaded)
+        </span>
+      </h3>
+
+      {/* Path row */}
+      <div style={{ display: 'flex', gap: 8, marginBottom: 12, alignItems: 'center' }}>
+        <input value={path} onChange={e => setPath(e.target.value)}
+          style={{ flex: 1, padding: '6px 10px', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', fontSize: 13, fontFamily: 'monospace', color: 'var(--text)', background: 'var(--surface)' }}
+          placeholder="C:/path/to/recipe.mdb"
+          onKeyDown={e => e.key === 'Enter' && scan()}
+        />
+        <button className="btn btn-secondary btn-sm" onClick={scan} disabled={scanning}>
+          {scanning ? 'Scanning…' : 'Connect'}
+        </button>
+      </div>
+
+      {/* Status */}
+      {info && !info.ok && (
+        <div style={{ color: 'var(--error)', fontSize: 13, marginBottom: 10 }}>
+          ✕ {info.error}
+        </div>
+      )}
+
+      {info?.ok && (
+        <div className="section-card" style={{ padding: 0 }}>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+            <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>
+              ✓ Connected — {info.tableCount} tables found
+            </span>
+            <div style={{ flex: 1 }} />
+            <button className="btn btn-primary btn-sm" onClick={importAll} disabled={allBusy}>
+              {allBusy ? 'Importing…' : '↑ Import All'}
+            </button>
+          </div>
+
+          <table className="data-grid" style={{ minWidth: 560 }}>
+            <thead>
+              <tr>
+                <th>Table</th>
+                <th style={{ textAlign: 'right' }}>Rows in Access</th>
+                <th style={{ minWidth: 160 }}>Action</th>
+                <th style={{ minWidth: 180 }}>Result</th>
+              </tr>
+            </thead>
+            <tbody>
+              {info.tables.map(t => {
+                const res = results[t.key]
+                const isBusy = busy[t.key]
+                return (
+                  <tr key={t.key} style={{ opacity: t.found ? 1 : 0.4 }}>
+                    <td>
+                      <div style={{ fontWeight: 600, fontSize: 13 }}>{t.label}</div>
+                      {!t.found && <div style={{ fontSize: 11, color: 'var(--error)' }}>Not found in this file</div>}
+                    </td>
+                    <td style={{ textAlign: 'right', fontVariantNumeric: 'tabular-nums' }}>
+                      {t.found ? Number(t.rows).toLocaleString() : '—'}
+                    </td>
+                    <td>
+                      <button className="btn btn-primary btn-sm" disabled={!t.found || isBusy}
+                        onClick={() => importTable(t.key)}>
+                        {isBusy ? 'Importing…' : '↑ Import'}
+                      </button>
+                    </td>
+                    <td>
+                      {res && (
+                        res.error
+                          ? <span style={{ color: 'var(--error)', fontSize: 12 }}>✕ {res.error}</span>
+                          : <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
+                              ✓ {res.imported?.toLocaleString()} rows
+                            </span>
+                      )}
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  )
+}
+
 export default function ImportExport() {
   const [results, setResults] = useState({})
   const [busy, setBusy] = useState({})
@@ -169,11 +304,14 @@ export default function ImportExport() {
           Import / Export
         </h2>
         <p style={{ fontSize: 13, color: 'var(--text-muted)', lineHeight: 1.7, maxWidth: 640 }}>
-          Export any table as CSV, or import from a CSV file — including exports from Access.
+          Import from your Access database directly, or export/import any table as CSV.
           Imports are safe to re-run: existing rows are updated, new rows are added, nothing is deleted.
         </p>
       </div>
 
+      <AccessDBPanel />
+
+      <div style={{ marginBottom: 8, fontSize: 13, fontWeight: 700, color: 'var(--text)' }}>CSV Import / Export</div>
       <div className="section-card">
         <table className="data-grid" style={{ minWidth: 680 }}>
           <thead>

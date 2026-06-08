@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pool, { query } from './db.js'
+import { openMDB, makeTableGetter, getTableInfo, IMPORTERS } from './mdb-import.js'
 
 const PgStore = connectPgSimple(session)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1524,6 +1525,39 @@ app.get('/api/activity-log', requireAuth, async (req, res) => {
     vals
   )
   res.json(rows)
+})
+
+// ─── Access Database ───────────────────────────────────────────────────────
+
+// GET /api/access/info?path=... — check file exists and list importable tables
+app.get('/api/access/info', requireAuth, async (req, res) => {
+  const filePath = req.query.path
+  if (!filePath) return res.status(400).json({ error: 'path query param required' })
+  try {
+    const db     = openMDB(filePath)          // throws if file not found
+    const tables = getTableInfo(db)
+    res.json({ ok: true, tableCount: db.getTableNames().length, tables })
+  } catch (e) {
+    res.status(400).json({ ok: false, error: e.message })
+  }
+})
+
+// POST /api/access/import/:table?path=... — import one table
+app.post('/api/access/import/:table', requireAuth, async (req, res) => {
+  const { table } = req.params
+  const filePath  = req.query.path
+  if (!filePath) return res.status(400).json({ error: 'path query param required' })
+  const importer  = IMPORTERS[table]
+  if (!importer)  return res.status(400).json({ error: `Unknown table: ${table}` })
+  try {
+    const db  = openMDB(filePath)
+    const tbl = makeTableGetter(db)
+    const n   = await importer(tbl, query)
+    await logActivity(req, 'access_import', `Imported ${n} rows into ${table} from ${filePath}`)
+    res.json({ imported: n, table })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 // ─── Error handler — always return JSON, never HTML ────────────────────────
