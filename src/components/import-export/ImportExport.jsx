@@ -150,10 +150,10 @@ function AccessDBPanel() {
     if (!file) return
     setLoading(true); setLoadMsg('Reading file…'); setLoadError(''); setDb(null); setTableInfo([]); setResults({})
     try {
-      const buf = await file.arrayBuffer()
+      const arrayBuf = await file.arrayBuffer()
       setLoadMsg('Parsing database…')
       const { default: MDBReader } = await import('mdb-reader')
-      const mdb = new MDBReader(buf)
+      const mdb = new MDBReader(Buffer.from(new Uint8Array(arrayBuf)))
       const nameMap = new Map(mdb.getTableNames().map(t => [t.toLowerCase(), t]))
       const info = Object.entries(MDB_TABLE_MAP).map(([key, cfg]) => {
         let totalRows = 0, found = false
