@@ -1,4 +1,4 @@
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
@@ -58,12 +58,16 @@ const fmtDate = d => {
 
 const fmt$ = v => `$${Number(v || 0).toFixed(0)}`
 
+const MONTH_LABELS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec']
+
 export default function Dashboard() {
-  const [stats, setStats]         = useState(null)
-  const [settings, setSettings]   = useState({})
-  const [trend, setTrend]         = useState([])
-  const [byType, setByType]       = useState([])
-  const [topAccounts, setTopAccts] = useState([])
+  const [stats, setStats]           = useState(null)
+  const [settings, setSettings]     = useState({})
+  const [trend, setTrend]           = useState([])
+  const [byType, setByType]         = useState([])
+  const [topAccounts, setTopAccts]  = useState([])
+  const [revHistory, setRevHistory] = useState([])
+  const [revView, setRevView]       = useState('monthly') // 'monthly' | 'yearly'
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -74,14 +78,35 @@ export default function Dashboard() {
       g('/api/dashboard/revenue-trend?days=30'),
       g('/api/dashboard/by-type'),
       g('/api/dashboard/top-accounts'),
-    ]).then(([s, cfg, tr, bt, ta]) => {
+      g('/api/dashboard/revenue-history'),
+    ]).then(([s, cfg, tr, bt, ta, rh]) => {
       if (s)   setStats(s)
       if (cfg) setSettings(cfg)
       if (Array.isArray(tr)) setTrend(tr.map(r => ({ ...r, date: fmtDate(r.date), revenue: parseFloat(r.revenue || 0) })))
       if (Array.isArray(bt)) setByType(bt.map(r => ({ ...r, units: parseFloat(r.units || 0) })))
       if (Array.isArray(ta)) setTopAccts(ta.map(r => ({ ...r, revenue: parseFloat(r.revenue || 0) })))
+      if (Array.isArray(rh)) setRevHistory(rh)
     })
   }, [])
+
+  const revMonthly = useMemo(() => revHistory.map(r => ({
+    label: MONTH_LABELS[parseInt(r.month.slice(5, 7)) - 1] + ' ' + r.month.slice(2, 4),
+    billed:    parseFloat(r.billed    || 0),
+    collected: parseFloat(r.collected || 0),
+  })), [revHistory])
+
+  const revYearly = useMemo(() => {
+    const map = {}
+    revHistory.forEach(r => {
+      const y = String(r.year)
+      if (!map[y]) map[y] = { label: y, billed: 0, collected: 0 }
+      map[y].billed    += parseFloat(r.billed    || 0)
+      map[y].collected += parseFloat(r.collected || 0)
+    })
+    return Object.values(map).sort((a, b) => a.label.localeCompare(b.label))
+  }, [revHistory])
+
+  const revData = revView === 'yearly' ? revYearly : revMonthly
 
   const bakingDate = settings.baking_date
     ? new Date(settings.baking_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
@@ -150,6 +175,47 @@ export default function Dashboard() {
           )}
         </ChartCard>
       </div>
+
+      {/* 5-Year Revenue History */}
+      {revData.length > 0 && (
+        <div style={{ marginBottom: 16 }}>
+          <div style={{
+            background: 'var(--surface)', border: '1px solid var(--border)',
+            borderRadius: 'var(--radius)', padding: '16px', boxShadow: 'var(--shadow-sm)'
+          }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 12 }}>
+              <span style={{ fontSize: 13, fontWeight: 700, color: 'var(--text)', letterSpacing: '-0.01em', flex: 1 }}>
+                Revenue History — Last 5 Years
+              </span>
+              <button className={`btn btn-sm ${revView === 'monthly' ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRevView('monthly')}>Monthly</button>
+              <button className={`btn btn-sm ${revView === 'yearly'  ? 'btn-primary' : 'btn-secondary'}`} onClick={() => setRevView('yearly')}>Yearly</button>
+            </div>
+            <div style={{ height: 260 }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={revData} margin={{ top: 4, right: 8, left: 0, bottom: revView === 'monthly' ? 20 : 4 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+                  <XAxis dataKey="label"
+                    tick={{ fontSize: revView === 'monthly' ? 10 : 12, fill: 'var(--text-muted)' }}
+                    tickLine={false}
+                    angle={revView === 'monthly' ? -45 : 0}
+                    textAnchor={revView === 'monthly' ? 'end' : 'middle'}
+                    interval={revView === 'monthly' ? 2 : 0}
+                  />
+                  <YAxis tickFormatter={v => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={52} />
+                  <Tooltip
+                    formatter={(v, name) => [`$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 2 })}`, name === 'billed' ? 'Billed' : 'Collected']}
+                    labelStyle={{ fontWeight: 600 }}
+                    contentStyle={{ fontSize: 12, borderRadius: 6 }}
+                  />
+                  <Legend formatter={v => v === 'billed' ? 'Billed' : 'Collected'} wrapperStyle={{ fontSize: 12 }} />
+                  <Bar dataKey="billed"    fill="var(--primary)"  radius={[3,3,0,0]} maxBarSize={revView === 'yearly' ? 80 : 20} />
+                  <Bar dataKey="collected" fill="#0d9488"         radius={[3,3,0,0]} maxBarSize={revView === 'yearly' ? 80 : 20} />
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Charts row 2 */}
       {topAccounts.length > 0 && (

@@ -420,6 +420,23 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 })
 
 // Orders summary: units per product for a given date (for bake list / have-need)
+app.get('/api/dashboard/revenue-history', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT
+        TO_CHAR(DATE_TRUNC('month', tix_date), 'YYYY-MM') AS month,
+        DATE_PART('year', tix_date)::int                   AS year,
+        SUM(total) AS billed,
+        SUM(paid)  AS collected
+      FROM track_tix
+      WHERE tix_date >= CURRENT_DATE - INTERVAL '5 years'
+      GROUP BY 1, 2
+      ORDER BY 1
+    `)
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 app.get('/api/dashboard/revenue-trend', requireAuth, async (req, res) => {
   const days = Math.min(parseInt(req.query.days) || 30, 90)
   try {
