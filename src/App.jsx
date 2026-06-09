@@ -19,6 +19,7 @@ import UsersPage from './components/users/UsersPage'
 import BillingPage from './components/billing/BillingPage'
 import IngredientsPage from './components/ingredients/IngredientsPage'
 import ActivityLog from './components/activity/ActivityLog'
+import ScanPage from './components/inventory/ScanPage'
 
 function Guarded({ children }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
@@ -47,6 +48,8 @@ export default function App() {
           path="/login"
           element={user ? <Navigate to="/" replace /> : <Login setUser={setUser} />}
         />
+        {/* Standalone mobile page — no Layout sidebar */}
+        <Route path="/scan" element={user ? <Guarded><ScanPage /></Guarded> : <Navigate to="/login" replace />} />
         <Route
           path="/"
           element={user ? <Layout user={user} setUser={setUser} /> : <Navigate to="/login" replace />}

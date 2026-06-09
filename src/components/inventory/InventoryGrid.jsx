@@ -1,7 +1,9 @@
 import { useState, useEffect, Fragment } from 'react'
+import { useNavigate } from 'react-router-dom'
 import EditableCell from '../shared/EditableCell'
 
 export default function InventoryGrid() {
+  const navigate = useNavigate()
   const [rows, setRows] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
@@ -50,6 +52,7 @@ export default function InventoryGrid() {
       <div className="page-toolbar">
         <span className="toolbar-info">{rows.length} products</span>
         <div className="toolbar-spacer" />
+        <button className="btn btn-primary btn-sm" onClick={() => navigate('/scan')}>📷 Scan</button>
         <button className="btn btn-secondary btn-sm" onClick={load}>Refresh</button>
       </div>
 

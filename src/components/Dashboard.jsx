@@ -16,6 +16,7 @@ const MODULES = [
   { to: '/baking',    icon: '🍞', label: 'Bake List',     desc: 'Generate and manage bake schedule' },
   { to: '/billing',   icon: '💳', label: 'Billing',       desc: 'Generate bills and track payments' },
   { to: '/import',    icon: '⇅',  label: 'Import/Export', desc: 'Import or export data as CSV' },
+  { to: '/scan',      icon: '📷', label: 'Scan',          desc: 'Scan barcodes to update inventory' },
 ]
 
 const PIE_COLORS = [
