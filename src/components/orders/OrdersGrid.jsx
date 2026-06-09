@@ -460,7 +460,12 @@ export default function OrdersGrid() {
                   return (
                     <th key={colKey(c)} title={isAcct ? (c.route||'') : (c.prod_group||'')}
                       style={{ textAlign: 'right', minWidth: isAcct ? 80 : 60 }}>
-                      <div>{colLabel(c)}</div>
+                      <div>
+                        {colLabel(c)}
+                        {!flipped && c.is_extra && (
+                          <span title="Extra product" style={{ marginLeft: 4, fontSize: 10, fontWeight: 700, color: '#d97706', opacity: 0.8 }}>E</span>
+                        )}
+                      </div>
                       {isAcct && (
                         <input type="date" value={dd || ''}
                           onChange={e => saveDelDate(c.name, e.target.value)}
@@ -482,7 +487,12 @@ export default function OrdersGrid() {
                 return (
                   <tr key={rowKey(r)}>
                     <td className="sticky-col acct-name">
-                      <div>{rowLabel(r)}</div>
+                      <div>
+                        {rowLabel(r)}
+                        {flipped && r.is_extra && (
+                          <span title="Extra product" style={{ marginLeft: 5, fontSize: 10, fontWeight: 700, color: '#d97706', opacity: 0.8 }}>E</span>
+                        )}
+                      </div>
                       {!flipped && (
                         <input type="date" value={delDateMap[r.name] || ''}
                           onChange={e => saveDelDate(r.name, e.target.value)}

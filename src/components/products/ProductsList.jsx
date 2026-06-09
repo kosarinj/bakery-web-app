@@ -1,7 +1,7 @@
 import { useState, useEffect, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 
-const EMPTY_NEW = { prod_name: '', prod_type: '', prod_group: '', subtype: '', multiplier: 1, divisor: 1, batch: false, notes: '' }
+const EMPTY_NEW = { prod_name: '', prod_type: '', prod_group: '', subtype: '', multiplier: 1, divisor: 1, batch: false, is_extra: false, notes: '' }
 const MAX_ROWS = 100
 
 const TABS = [
@@ -129,6 +129,7 @@ export default function ProductsList() {
                   <th style={{ minWidth: 90 }}>Subtype</th>
                   <th style={{ minWidth: 65, textAlign: 'center' }}>Batch</th>
                   <th style={{ minWidth: 70, textAlign: 'center' }}>Gluten Free</th>
+                  <th style={{ minWidth: 60, textAlign: 'center' }}>Extra</th>
                   <th style={{ minWidth: 70, textAlign: 'center' }}>Active</th>
                   <th style={{ minWidth: 200 }}>Notes</th>
                 </tr>
@@ -148,6 +149,7 @@ export default function ProductsList() {
                         <td><EditableCell value={p.subtype||''} onSave={v=>save(p.prod_name,'subtype',v)} type="text" align="left"/></td>
                         <td style={{textAlign:'center'}}><BoolCell value={p.batch} onChange={v=>save(p.prod_name,'batch',v)}/></td>
                         <td style={{textAlign:'center'}}><BoolCell value={p.gluten_free} onChange={v=>save(p.prod_name,'gluten_free',v)}/></td>
+                        <td style={{textAlign:'center'}}><BoolCell value={p.is_extra} onChange={v=>save(p.prod_name,'is_extra',v)}/></td>
                         <td style={{textAlign:'center'}}>
                           <span className={`badge ${p.active?'badge-green':'badge-red'}`} style={{cursor:'pointer'}}
                             onClick={()=>save(p.prod_name,'active',!p.active)}>
@@ -171,7 +173,7 @@ export default function ProductsList() {
                     <td><input type="text" placeholder="Group" value={newProd.prod_group}
                       style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
                       onChange={e=>setNewProd(p=>({...p,prod_group:e.target.value}))}/></td>
-                    <td colSpan={4} style={{textAlign:'center',whiteSpace:'nowrap'}}>
+                    <td colSpan={5} style={{textAlign:'center',whiteSpace:'nowrap'}}>
                       <button className="btn btn-primary btn-sm" style={{marginRight:6}} onClick={addProduct}>Add</button>
                       <button className="btn btn-secondary btn-sm" onClick={()=>{setAdding(false);setNewProd(EMPTY_NEW)}}>Cancel</button>
                     </td>
@@ -180,7 +182,7 @@ export default function ProductsList() {
                       onChange={e=>setNewProd(p=>({...p,notes:e.target.value}))}/></td>
                   </tr>
                 )}
-                {safeProducts.length===0&&!adding&&<tr><td colSpan={8} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No products yet.</td></tr>}
+                {safeProducts.length===0&&!adding&&<tr><td colSpan={9} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No products yet.</td></tr>}
               </tbody>
             </table>
           )}

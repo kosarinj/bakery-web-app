@@ -167,7 +167,7 @@ app.patch('/api/products/:name', requireAuth, async (req, res) => {
   const fields = [
     'prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes',
     'prod_id','upc_code','label1','label2','label3','weight','color1','color2','color3',
-    'subtype','ingsize','labelsize','weightsize','ingheight','whichlabel','labor_weight','webtype','gluten_free'
+    'subtype','ingsize','labelsize','weightsize','ingheight','whichlabel','labor_weight','webtype','gluten_free','is_extra'
   ]
   const updates = []
   const vals = []

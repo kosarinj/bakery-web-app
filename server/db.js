@@ -68,6 +68,9 @@ async function initDB() {
   // Unique index on spec_orders.order_num (mirrors daily_orders pattern)
   await pool.query(`CREATE UNIQUE INDEX IF NOT EXISTS idx_spec_orders_order_num ON spec_orders(order_num) WHERE order_num IS NOT NULL`)
 
+  // is_extra flag on products — marks products that belong to the "extras" category
+  await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_extra BOOLEAN DEFAULT FALSE`)
+
   // Indexes for daily_orders — critical once the table has millions of historical rows
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_ordr_dt  ON daily_orders(ordr_dt)`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_account  ON daily_orders(account)`)
