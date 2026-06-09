@@ -472,7 +472,9 @@ app.get('/api/dashboard/revenue-trend', requireAuth, async (req, res) => {
              SUM(units)           AS units,
              COUNT(DISTINCT account) AS accounts
       FROM daily_orders
-      WHERE ordr_dt >= (SELECT COALESCE(MAX(ordr_dt), CURRENT_DATE) FROM daily_orders) - $1
+      WHERE ordr_dt IN (
+        SELECT DISTINCT ordr_dt FROM daily_orders ORDER BY ordr_dt DESC LIMIT $1
+      )
       GROUP BY ordr_dt ORDER BY ordr_dt
     `, [days])
     res.json(rows)
@@ -480,9 +482,13 @@ app.get('/api/dashboard/revenue-trend', requireAuth, async (req, res) => {
 })
 
 app.get('/api/dashboard/by-type', requireAuth, async (req, res) => {
-  const { date } = req.query
-  const dateVal = date || new Date().toISOString().slice(0, 10)
   try {
+    const { date } = req.query
+    let dateVal = date
+    if (!dateVal) {
+      const { rows: mx } = await query('SELECT MAX(ordr_dt)::text AS d FROM daily_orders')
+      dateVal = mx[0]?.d || new Date().toISOString().slice(0, 10)
+    }
     const { rows } = await query(`
       SELECT COALESCE(p.prod_type, 'Other') AS type,
              SUM(o.units) AS units,
@@ -492,7 +498,7 @@ app.get('/api/dashboard/by-type', requireAuth, async (req, res) => {
       WHERE o.ordr_dt = $1
       GROUP BY p.prod_type ORDER BY units DESC
     `, [dateVal])
-    res.json(rows)
+    res.json({ date: dateVal, data: rows })
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
@@ -512,11 +518,13 @@ app.get('/api/dashboard/top-accounts', requireAuth, async (req, res) => {
 })
 
 app.get('/api/dashboard', requireAuth, async (req, res) => {
-  const today = new Date().toISOString().slice(0, 10)
+  const dateParam = req.query.date || null
   const [accts, prods, orders] = await Promise.all([
     query('SELECT COUNT(*) FROM accounts WHERE active=true'),
     query('SELECT COUNT(*) FROM products WHERE active=true'),
-    query('SELECT COUNT(DISTINCT account) AS orders_today, COUNT(*) AS order_lines FROM daily_orders WHERE ordr_dt=$1', [today]),
+    dateParam
+      ? query('SELECT COUNT(DISTINCT account) AS orders_today, COUNT(*) AS order_lines FROM daily_orders WHERE ordr_dt=$1', [dateParam])
+      : query('SELECT COUNT(DISTINCT account) AS orders_today, COUNT(*) AS order_lines FROM daily_orders WHERE ordr_dt=(SELECT MAX(ordr_dt) FROM daily_orders)'),
   ])
   res.json({
     accounts:     parseInt(accts.rows[0].count),

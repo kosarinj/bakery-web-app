@@ -64,35 +64,44 @@ export default function Dashboard() {
   const [stats, setStats]           = useState(null)
   const [settings, setSettings]     = useState({})
   const [trend, setTrend]           = useState([])
-  const [byType, setByType]         = useState([])
+  const [byType, setByType]         = useState({ date: null, data: [] })
   const [topAccounts, setTopAccts]  = useState([])
   const [revHistory, setRevHistory] = useState([])
   const [revView, setRevView]       = useState('monthly') // 'monthly' | 'yearly'
   const [revYears, setRevYears]     = useState(5)
-  const [yoy, setYoy]               = useState([])
+  const [yoy, setYoy]               = useState(null)
   const navigate = useNavigate()
 
   useEffect(() => {
     const g = url => fetch(url, { credentials: 'include' }).then(r => r.json()).catch(() => null)
     Promise.all([
-      g('/api/dashboard'),
       g('/api/settings'),
       g('/api/dashboard/revenue-trend?days=30'),
-      g('/api/dashboard/by-type'),
       g('/api/dashboard/top-accounts'),
       g('/api/dashboard/yoy'),
-    ]).then(([s, cfg, tr, bt, ta, yoyData]) => {
-      if (s)   setStats(s)
+    ]).then(([cfg, tr, ta, yoyData]) => {
       if (cfg) setSettings(cfg)
+
+      const bakingDate = cfg?.baking_date || null
+      const dateParam  = bakingDate ? `?date=${bakingDate}` : ''
+
+      // Re-fetch baking-date-sensitive endpoints now that we have the date
+      Promise.all([
+        g(`/api/dashboard${dateParam}`),
+        g(`/api/dashboard/by-type${dateParam}`),
+      ]).then(([s, bt]) => {
+        if (s)  setStats(s)
+        if (bt) setByType({ date: bt.date, data: Array.isArray(bt.data) ? bt.data.map(r => ({ ...r, units: parseFloat(r.units || 0) })) : [] })
+      })
+
       if (Array.isArray(tr)) setTrend(tr.map(r => ({ ...r, date: fmtDate(r.date), revenue: parseFloat(r.revenue || 0) })))
-      if (Array.isArray(bt)) setByType(bt.map(r => ({ ...r, units: parseFloat(r.units || 0) })))
       if (Array.isArray(ta)) setTopAccts(ta.map(r => ({ ...r, revenue: parseFloat(r.revenue || 0) })))
       if (Array.isArray(yoyData) && yoyData.length > 0) {
         const all12 = MONTH_LABELS.map((lbl, i) => {
           const row = yoyData.find(r => parseInt(r.month_num) === i + 1)
           return {
             month: lbl,
-            cur: parseFloat(row?.cur_revenue || 0),
+            cur:  parseFloat(row?.cur_revenue  || 0),
             prev: parseFloat(row?.prev_revenue || 0),
           }
         })
@@ -153,9 +162,9 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Charts row 1 */}
-      <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16, marginBottom: 16 }}>
-        <ChartCard title={`Order Revenue — Last 30 Days${trend.length > 0 ? ' (ending ' + trend[trend.length-1].date + ')' : ''}`} height={220}>
+      {/* Charts row 1 — revenue trend full width */}
+      <div style={{ marginBottom: 16 }}>
+        <ChartCard title={`Order Revenue — Last 30 Baking Days${trend.length > 0 ? ' (through ' + trend[trend.length-1].date + ')' : ''}`} height={220}>
           {trend.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -168,26 +177,7 @@ export default function Dashboard() {
             </ResponsiveContainer>
           ) : (
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: 13 }}>
-              No order data yet for the last 30 days
-            </div>
-          )}
-        </ChartCard>
-
-        <ChartCard title="Today's Orders by Type" height={220}>
-          {byType.length > 0 ? (
-            <ResponsiveContainer width="100%" height="100%">
-              <PieChart>
-                <Pie data={byType} dataKey="units" nameKey="type" cx="45%" cy="50%" outerRadius={75}
-                  label={({ type, percent }) => percent > 0.05 ? `${type} ${(percent * 100).toFixed(0)}%` : ''}
-                  labelLine={false}>
-                  {byType.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Pie>
-                <Tooltip formatter={(v, n) => [v + ' units', n]} contentStyle={{ fontSize: 12, borderRadius: 6 }} />
-              </PieChart>
-            </ResponsiveContainer>
-          ) : (
-            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', color: 'var(--text-muted)', fontSize: 13 }}>
-              No orders for today yet
+              No order data yet
             </div>
           )}
         </ChartCard>
@@ -265,22 +255,38 @@ export default function Dashboard() {
         </div>
       )}
 
-      {/* Charts row 2 */}
-      {topAccounts.length > 0 && (
-        <div style={{ marginBottom: 20 }}>
-          <ChartCard title="Top Accounts — Revenue Last 30 Days of Activity" height={200}>
-            <ResponsiveContainer width="100%" height="100%">
-              <BarChart data={topAccounts} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" horizontal={false} />
-                <XAxis type="number" tickFormatter={fmt$} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
-                <YAxis type="category" dataKey="account" width={110} tick={{ fontSize: 11, fill: 'var(--text)' }} tickLine={false} />
-                <Tooltip formatter={(v) => [fmt$(v), 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 6 }} />
-                <Bar dataKey="revenue" fill="var(--primary)" radius={[0, 4, 4, 0]}>
-                  {topAccounts.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
-                </Bar>
-              </BarChart>
-            </ResponsiveContainer>
-          </ChartCard>
+      {/* Charts row 2 — top accounts + orders by type side by side */}
+      {(topAccounts.length > 0 || byType.data.length > 0) && (
+        <div style={{ display: 'grid', gridTemplateColumns: topAccounts.length > 0 && byType.data.length > 0 ? '3fr 2fr' : '1fr', gap: 16, marginBottom: 20 }}>
+          {topAccounts.length > 0 && (
+            <ChartCard title="Top Accounts — Last 30 Baking Days" height={220}>
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={topAccounts} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" horizontal={false} />
+                  <XAxis type="number" tickFormatter={fmt$} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} />
+                  <YAxis type="category" dataKey="account" width={110} tick={{ fontSize: 11, fill: 'var(--text)' }} tickLine={false} />
+                  <Tooltip formatter={(v) => [fmt$(v), 'Revenue']} contentStyle={{ fontSize: 12, borderRadius: 6 }} />
+                  <Bar dataKey="revenue" fill="var(--primary)" radius={[0, 4, 4, 0]}>
+                    {topAccounts.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Bar>
+                </BarChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
+          {byType.data.length > 0 && (
+            <ChartCard title={`Orders by Type${byType.date ? ' — ' + fmtDate(byType.date) : ''}`} height={220}>
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie data={byType.data} dataKey="units" nameKey="type" cx="45%" cy="50%" outerRadius={75}
+                    label={({ type, percent }) => percent > 0.05 ? `${type} ${(percent * 100).toFixed(0)}%` : ''}
+                    labelLine={false}>
+                    {byType.data.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
+                  </Pie>
+                  <Tooltip formatter={(v, n) => [v + ' units', n]} contentStyle={{ fontSize: 12, borderRadius: 6 }} />
+                </PieChart>
+              </ResponsiveContainer>
+            </ChartCard>
+          )}
         </div>
       )}
 
