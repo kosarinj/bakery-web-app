@@ -332,11 +332,10 @@ export default function OrdersGrid() {
           onClick={() => setFlipped(v => !v)} title="Swap rows and columns">
           ⇄ Flip
         </button>
-        <button className={`btn btn-sm ${extrasOnly ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setExtrasOnly(v => !v)}
-          title="Show only extras products">
-          {extrasOnly ? '★' : '☆'} Extras
-        </button>
+        <label style={{ gap: 6, fontWeight: extrasOnly ? 700 : 400, color: extrasOnly ? 'var(--primary)' : 'inherit' }}>
+          <input type="checkbox" checked={extrasOnly} onChange={e => setExtrasOnly(e.target.checked)} />
+          Extras
+        </label>
         <label style={{ gap: 6 }}>
           Type:
           <select value={filterProductType} onChange={e => setFilterProductType(e.target.value)}
