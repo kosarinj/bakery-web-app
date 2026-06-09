@@ -440,6 +440,29 @@ app.get('/api/dashboard/revenue-history', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+app.get('/api/dashboard/yoy', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      WITH ranked_years AS (
+        SELECT DISTINCT EXTRACT(YEAR FROM ordr_dt)::int AS yr
+        FROM daily_orders ORDER BY yr DESC LIMIT 2
+      ),
+      cur_yr  AS (SELECT MAX(yr) AS y FROM ranked_years),
+      prev_yr AS (SELECT MIN(yr) AS y FROM ranked_years)
+      SELECT
+        EXTRACT(MONTH FROM ordr_dt)::int AS month_num,
+        (SELECT y FROM cur_yr)::int       AS cur_year,
+        (SELECT y FROM prev_yr)::int      AS prev_year,
+        SUM(CASE WHEN EXTRACT(YEAR FROM ordr_dt)=(SELECT y FROM cur_yr)  THEN wprice*units ELSE 0 END) AS cur_revenue,
+        SUM(CASE WHEN EXTRACT(YEAR FROM ordr_dt)=(SELECT y FROM prev_yr) THEN wprice*units ELSE 0 END) AS prev_revenue
+      FROM daily_orders
+      WHERE EXTRACT(YEAR FROM ordr_dt) IN (SELECT yr FROM ranked_years)
+      GROUP BY 1, cur_year, prev_year ORDER BY 1
+    `)
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 app.get('/api/dashboard/revenue-trend', requireAuth, async (req, res) => {
   const days = Math.min(parseInt(req.query.days) || 30, 90)
   try {
@@ -449,7 +472,7 @@ app.get('/api/dashboard/revenue-trend', requireAuth, async (req, res) => {
              SUM(units)           AS units,
              COUNT(DISTINCT account) AS accounts
       FROM daily_orders
-      WHERE ordr_dt >= CURRENT_DATE - $1
+      WHERE ordr_dt >= (SELECT COALESCE(MAX(ordr_dt), CURRENT_DATE) FROM daily_orders) - $1
       GROUP BY ordr_dt ORDER BY ordr_dt
     `, [days])
     res.json(rows)
@@ -481,7 +504,7 @@ app.get('/api/dashboard/top-accounts', requireAuth, async (req, res) => {
              SUM(o.wprice * o.units) AS revenue,
              COUNT(DISTINCT o.ordr_dt) AS order_days
       FROM daily_orders o
-      WHERE o.ordr_dt >= CURRENT_DATE - 30
+      WHERE o.ordr_dt >= (SELECT COALESCE(MAX(ordr_dt), CURRENT_DATE) FROM daily_orders) - 30
       GROUP BY o.account ORDER BY revenue DESC LIMIT 8
     `)
     res.json(rows)

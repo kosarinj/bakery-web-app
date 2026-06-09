@@ -69,6 +69,7 @@ export default function Dashboard() {
   const [revHistory, setRevHistory] = useState([])
   const [revView, setRevView]       = useState('monthly') // 'monthly' | 'yearly'
   const [revYears, setRevYears]     = useState(5)
+  const [yoy, setYoy]               = useState([])
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -79,12 +80,24 @@ export default function Dashboard() {
       g('/api/dashboard/revenue-trend?days=30'),
       g('/api/dashboard/by-type'),
       g('/api/dashboard/top-accounts'),
-    ]).then(([s, cfg, tr, bt, ta]) => {
+      g('/api/dashboard/yoy'),
+    ]).then(([s, cfg, tr, bt, ta, yoyData]) => {
       if (s)   setStats(s)
       if (cfg) setSettings(cfg)
       if (Array.isArray(tr)) setTrend(tr.map(r => ({ ...r, date: fmtDate(r.date), revenue: parseFloat(r.revenue || 0) })))
       if (Array.isArray(bt)) setByType(bt.map(r => ({ ...r, units: parseFloat(r.units || 0) })))
       if (Array.isArray(ta)) setTopAccts(ta.map(r => ({ ...r, revenue: parseFloat(r.revenue || 0) })))
+      if (Array.isArray(yoyData) && yoyData.length > 0) {
+        const all12 = MONTH_LABELS.map((lbl, i) => {
+          const row = yoyData.find(r => parseInt(r.month_num) === i + 1)
+          return {
+            month: lbl,
+            cur: parseFloat(row?.cur_revenue || 0),
+            prev: parseFloat(row?.prev_revenue || 0),
+          }
+        })
+        setYoy({ data: all12, curYear: yoyData[0].cur_year, prevYear: yoyData[0].prev_year })
+      }
     })
   }, [])
 
@@ -142,7 +155,7 @@ export default function Dashboard() {
 
       {/* Charts row 1 */}
       <div style={{ display: 'grid', gridTemplateColumns: '3fr 2fr', gap: 16, marginBottom: 16 }}>
-        <ChartCard title="Order Revenue — Last 30 Days" height={220}>
+        <ChartCard title={`Order Revenue — Last 30 Days${trend.length > 0 ? ' (ending ' + trend[trend.length-1].date + ')' : ''}`} height={220}>
           {trend.length > 0 ? (
             <ResponsiveContainer width="100%" height="100%">
               <LineChart data={trend} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
@@ -229,10 +242,33 @@ export default function Dashboard() {
         </div>
       )}
 
+      {/* Year-over-Year comparison */}
+      {yoy?.data && (
+        <div style={{ marginBottom: 16 }}>
+          <ChartCard title={`Monthly Sales — ${yoy.curYear} vs ${yoy.prevYear}`} height={240}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart data={yoy.data} margin={{ top: 4, right: 8, left: 0, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" vertical={false} />
+                <XAxis dataKey="month" tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} />
+                <YAxis tickFormatter={v => `$${(v/1000).toFixed(0)}k`} tick={{ fontSize: 11, fill: 'var(--text-muted)' }} tickLine={false} axisLine={false} width={52} />
+                <Tooltip
+                  formatter={(v, name) => [`$${Number(v).toLocaleString('en-US', { minimumFractionDigits: 0 })}`, name === 'cur' ? String(yoy.curYear) : String(yoy.prevYear)]}
+                  labelStyle={{ fontWeight: 600 }}
+                  contentStyle={{ fontSize: 12, borderRadius: 6 }}
+                />
+                <Legend formatter={v => v === 'cur' ? String(yoy.curYear) : String(yoy.prevYear)} wrapperStyle={{ fontSize: 12 }} />
+                <Bar dataKey="prev" fill="#94a3b8" radius={[3,3,0,0]} maxBarSize={28} />
+                <Bar dataKey="cur"  fill="var(--primary)" radius={[3,3,0,0]} maxBarSize={28} />
+              </BarChart>
+            </ResponsiveContainer>
+          </ChartCard>
+        </div>
+      )}
+
       {/* Charts row 2 */}
       {topAccounts.length > 0 && (
         <div style={{ marginBottom: 20 }}>
-          <ChartCard title="Top Accounts — Revenue Last 30 Days" height={200}>
+          <ChartCard title="Top Accounts — Revenue Last 30 Days of Activity" height={200}>
             <ResponsiveContainer width="100%" height="100%">
               <BarChart data={topAccounts} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" horizontal={false} />
@@ -249,7 +285,7 @@ export default function Dashboard() {
       )}
 
       {/* Module cards */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: 10 }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(160px, 1fr))', gap: 10 }}>
         {MODULES.map(m => (
           <button key={m.to} onClick={() => navigate(m.to)}
             style={{
