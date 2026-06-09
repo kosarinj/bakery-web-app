@@ -71,6 +71,27 @@ async function initDB() {
   // is_extra flag on products — marks products that belong to the "extras" category
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_extra BOOLEAN DEFAULT FALSE`)
 
+  // Daily inventory — end-of-day location scanning (Left/Return counts per delivery stop)
+  const { rows: diCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='daily_inventory' LIMIT 1`)
+  if (!diCheck.length) {
+    await pool.query(`
+      CREATE TABLE daily_inventory (
+        id          SERIAL PRIMARY KEY,
+        location    TEXT NOT NULL,
+        inv_date    DATE NOT NULL DEFAULT CURRENT_DATE,
+        prod_name   TEXT REFERENCES products(prod_name) ON UPDATE CASCADE,
+        scanned_at  TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        left_qty    NUMERIC(10,2) DEFAULT 0,
+        return_qty  NUMERIC(10,2) DEFAULT 0,
+        override    BOOLEAN DEFAULT FALSE
+      )
+    `)
+    await pool.query(`CREATE UNIQUE INDEX idx_daily_inv_uniq ON daily_inventory(location, inv_date, prod_name, scanned_at)`)
+    await pool.query(`CREATE INDEX idx_daily_inv_date     ON daily_inventory(inv_date DESC)`)
+    await pool.query(`CREATE INDEX idx_daily_inv_location ON daily_inventory(location)`)
+    console.log('Applied: daily_inventory table')
+  }
+
   // Indexes for daily_orders — critical once the table has millions of historical rows
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_ordr_dt  ON daily_orders(ordr_dt)`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_account  ON daily_orders(account)`)

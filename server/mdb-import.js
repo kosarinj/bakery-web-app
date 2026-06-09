@@ -15,6 +15,11 @@ export const midate = v => {
   const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString().slice(0, 10)
 }
 export const mordnum = v => { const n = parseInt(v); return (!n || n === 0) ? null : n }
+export const mits = v => {
+  if (!v) return null
+  if (v instanceof Date) return isNaN(v.getTime()) ? null : v.toISOString()
+  const d = new Date(v); return isNaN(d.getTime()) ? null : d.toISOString()
+}
 
 // ── Open an MDB file ──────────────────────────────────────────────────────────
 export async function openMDB(filePath) {
@@ -364,6 +369,32 @@ export async function importExtras(tbl, q) {
   return importDailyOrderRows(rows, q, { isExtra: true })
 }
 
+export async function importDailyInventory(tbl, q) {
+  const rows = tbl('_').map(r => ({
+    location:   mstr(r.location),
+    inv_date:   midate(r.date),
+    prod_name:  mstr(r.prod_name),
+    scanned_at: mits(r.timestamp),
+    left_qty:   mnum(r.Left)   ?? 0,
+    return_qty: mnum(r.Return) ?? 0,
+    override:   mbool(r.override),
+  })).filter(r => r.location && r.inv_date && r.prod_name)
+  if (!rows.length) return 0
+
+  const prods = [...new Set(rows.map(r => r.prod_name))]
+  for (let i = 0; i < prods.length; i += 200) {
+    const c = prods.slice(i, i + 200)
+    await q(`INSERT INTO products(prod_name,active) VALUES ${c.map((_,j)=>`($${j+1},false)`).join(',')} ON CONFLICT DO NOTHING`, c)
+  }
+
+  const cols = ['location','inv_date','prod_name','scanned_at','left_qty','return_qty','override']
+  return chunkInsert(rows, 500, async chunk => {
+    const vals = chunk.flatMap(r => cols.map(c => r[c] ?? null))
+    const ph = chunk.map((_, ri) => '(' + cols.map((_, ci) => `$${ri*cols.length+ci+1}`).join(',') + ')').join(',')
+    await q(`INSERT INTO daily_inventory(${cols.join(',')}) VALUES ${ph} ON CONFLICT DO NOTHING`, vals)
+  })
+}
+
 // ── Dispatch by key ───────────────────────────────────────────────────────────
 export const IMPORTERS = {
   accounts:       importAccounts,
@@ -375,6 +406,7 @@ export const IMPORTERS = {
   inventory:      importInventory,
   spec_orders:    importSpecOrders,
   track_tix:      importTrackTix,
-  order_history:  importOrderHistory,
-  extras:         importExtras,
+  order_history:    importOrderHistory,
+  extras:           importExtras,
+  daily_inventory:  importDailyInventory,
 }

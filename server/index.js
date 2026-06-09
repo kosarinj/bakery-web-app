@@ -276,6 +276,39 @@ app.put('/api/inventory/:prod_name', requireAuth, async (req, res) => {
   }
 })
 
+// ─── Daily Inventory ───────────────────────────────────────────────────────
+
+app.get('/api/daily-inventory/locations', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`SELECT DISTINCT location FROM daily_inventory ORDER BY location`)
+    res.json(rows.map(r => r.location))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.get('/api/daily-inventory', requireAuth, async (req, res) => {
+  const { date, location } = req.query
+  const d = date || new Date().toISOString().slice(0, 10)
+  try {
+    const { rows } = location
+      ? await query(`SELECT di.*, p.prod_group FROM daily_inventory di LEFT JOIN products p ON p.prod_name=di.prod_name WHERE di.inv_date=$1 AND di.location=$2 ORDER BY di.scanned_at DESC`, [d, location])
+      : await query(`SELECT di.*, p.prod_group FROM daily_inventory di LEFT JOIN products p ON p.prod_name=di.prod_name WHERE di.inv_date=$1 ORDER BY di.location, di.scanned_at DESC`, [d])
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/daily-inventory', requireAuth, async (req, res) => {
+  const { location, inv_date, prod_name, left_qty, return_qty, override } = req.body
+  if (!location || !prod_name) return res.status(400).json({ error: 'location and prod_name required' })
+  try {
+    const { rows } = await query(
+      `INSERT INTO daily_inventory(location,inv_date,prod_name,left_qty,return_qty,override)
+       VALUES($1,$2,$3,$4,$5,$6) RETURNING *`,
+      [location, inv_date || new Date().toISOString().slice(0,10), prod_name, left_qty ?? 0, return_qty ?? 0, override ?? false]
+    )
+    res.json(rows[0])
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // ─── Prices ────────────────────────────────────────────────────────────────
 
 app.get('/api/prices', requireAuth, async (req, res) => {

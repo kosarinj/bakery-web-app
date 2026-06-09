@@ -134,6 +134,11 @@ const MDB_TABLE_MAP = {
     label: 'Extras → Orders',
     chunked: true,
   },
+  daily_inventory: {
+    mdbNames: ['daily_inventory'],
+    label: 'Daily Inventory',
+    chunked: true,
+  },
 }
 
 function rowsToCSV(rows) {
