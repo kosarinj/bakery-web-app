@@ -20,6 +20,7 @@ import BillingPage from './components/billing/BillingPage'
 import IngredientsPage from './components/ingredients/IngredientsPage'
 import ActivityLog from './components/activity/ActivityLog'
 import ScanPage from './components/inventory/ScanPage'
+import DailyInventoryPage from './components/inventory/DailyInventoryPage'
 
 function Guarded({ children }) {
   return <ErrorBoundary>{children}</ErrorBoundary>
@@ -57,7 +58,8 @@ export default function App() {
           <Route index element={<Guarded><Dashboard /></Guarded>} />
           <Route path="orders"       element={<Guarded><OrdersGrid /></Guarded>} />
           <Route path="spec-orders"  element={<Guarded><SpecialOrders /></Guarded>} />
-          <Route path="inventory"  element={<Guarded><InventoryGrid /></Guarded>} />
+          <Route path="inventory"        element={<Guarded><InventoryGrid /></Guarded>} />
+          <Route path="daily-inventory" element={<Guarded><DailyInventoryPage /></Guarded>} />
           <Route path="products"   element={<Guarded><ProductsList /></Guarded>} />
           <Route path="recipes"      element={<Guarded><RecipeGrid /></Guarded>} />
           <Route path="recipe-gen"   element={<Guarded><RecipeGenerator /></Guarded>} />
