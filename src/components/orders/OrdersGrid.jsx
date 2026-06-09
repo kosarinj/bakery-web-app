@@ -100,6 +100,7 @@ export default function OrdersGrid() {
   const [filterProductType, setFilterProductType] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [extrasOnly, setExtrasOnly] = useState(false)
 
   // Copy / Repeat
   const [copyFrom, setCopyFrom] = useState('')
@@ -236,11 +237,12 @@ export default function OrdersGrid() {
 
   const visibleProducts = useMemo(() => {
     let p = Array.isArray(products) ? products : []
+    if (extrasOnly) p = p.filter(x => x.is_extra)
     if (filterProductType) p = p.filter(x => x.prod_type === filterProductType)
     if (filterProduct) p = p.filter(x => (x.prod_name||'').toLowerCase().includes(filterProduct.toLowerCase()))
     if (hideEmptyCols) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
     return p
-  }, [products, filterProductType, filterProduct, hideEmptyCols, accounts, orderMap])
+  }, [products, extrasOnly, filterProductType, filterProduct, hideEmptyCols, accounts, orderMap])
 
   const visibleAccounts = useMemo(() => {
     let a = Array.isArray(accounts) ? accounts : []
@@ -329,6 +331,11 @@ export default function OrdersGrid() {
         <button className={`btn btn-sm ${flipped ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setFlipped(v => !v)} title="Swap rows and columns">
           ⇄ Flip
+        </button>
+        <button className={`btn btn-sm ${extrasOnly ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={() => setExtrasOnly(v => !v)}
+          title="Show only extras products">
+          {extrasOnly ? '★' : '☆'} Extras
         </button>
         <label style={{ gap: 6 }}>
           Type:
