@@ -18,7 +18,11 @@ const MODULES = [
   { to: '/import',    icon: '⇅',  label: 'Import/Export', desc: 'Import or export data as CSV' },
 ]
 
-const PIE_COLORS = ['#7c3aed','#0d9488','#e11d48','#ea580c','#1d4ed8','#4d7c0f','#be185d','#0369a1']
+const PIE_COLORS = [
+  '#7c3aed','#0d9488','#e11d48','#ea580c','#1d4ed8','#4d7c0f','#be185d','#0369a1',
+  '#b45309','#15803d','#7e22ce','#0f766e','#c2410c','#1e40af','#166534','#9d174d',
+  '#92400e','#065f46','#4c1d95','#155e75',
+]
 
 function StatCard({ label, value, color }) {
   return (
@@ -259,7 +263,7 @@ export default function Dashboard() {
       {(topAccounts.length > 0 || byType.data.length > 0) && (
         <div style={{ display: 'grid', gridTemplateColumns: topAccounts.length > 0 && byType.data.length > 0 ? '3fr 2fr' : '1fr', gap: 16, marginBottom: 20 }}>
           {topAccounts.length > 0 && (
-            <ChartCard title="Top Accounts — Last 30 Baking Days" height={220}>
+            <ChartCard title="Top Accounts — Last 30 Baking Days" height={260}>
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={topAccounts} layout="vertical" margin={{ top: 0, right: 40, left: 0, bottom: 0 }}>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--border-light)" horizontal={false} />
@@ -274,15 +278,20 @@ export default function Dashboard() {
             </ChartCard>
           )}
           {byType.data.length > 0 && (
-            <ChartCard title={`Orders by Type${byType.date ? ' — ' + fmtDate(byType.date) : ''}`} height={220}>
+            <ChartCard title={`Orders by Type${byType.date ? ' — ' + fmtDate(byType.date) : ''}`} height={260}>
               <ResponsiveContainer width="100%" height="100%">
                 <PieChart>
-                  <Pie data={byType.data} dataKey="units" nameKey="type" cx="45%" cy="50%" outerRadius={75}
-                    label={({ type, percent }) => percent > 0.05 ? `${type} ${(percent * 100).toFixed(0)}%` : ''}
-                    labelLine={false}>
+                  <Pie data={byType.data} dataKey="units" nameKey="type"
+                       cx="50%" cy="38%" outerRadius={72}
+                       label={({ percent }) => percent > 0.07 ? `${(percent * 100).toFixed(0)}%` : ''}
+                       labelLine={false}>
                     {byType.data.map((_, i) => <Cell key={i} fill={PIE_COLORS[i % PIE_COLORS.length]} />)}
                   </Pie>
-                  <Tooltip formatter={(v, n) => [v + ' units', n]} contentStyle={{ fontSize: 12, borderRadius: 6 }} />
+                  <Tooltip
+                    formatter={(v, n) => [`${v} units (${((v / byType.data.reduce((s,r)=>s+r.units,0))*100).toFixed(1)}%)`, n]}
+                    contentStyle={{ fontSize: 12, borderRadius: 6 }}
+                  />
+                  <Legend iconSize={9} iconType="circle" wrapperStyle={{ fontSize: 11, lineHeight: '18px', paddingTop: 4 }} />
                 </PieChart>
               </ResponsiveContainer>
             </ChartCard>
