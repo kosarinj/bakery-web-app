@@ -22,6 +22,7 @@ export default function BillingPage() {
   const [genDate, setGenDate] = useState('')
   const [genMsg, setGenMsg] = useState('')
   const [generating, setGenerating] = useState(false)
+  const [exportAcct, setExportAcct] = useState('')
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' }).then(r => r.json())
@@ -112,6 +113,12 @@ export default function BillingPage() {
   const totalBilled      = tickets.reduce((s, t) => s + parseFloat(t.total || 0), 0)
   const selectedArr      = [...selected]
 
+  function exportXlsx(type) {
+    const params = new URLSearchParams({ del_date: genDate })
+    if (exportAcct) params.set('account', exportAcct)
+    window.open(`/api/billing/export/${type}?${params}`, '_blank')
+  }
+
   return (
     <div>
       {/* Top row */}
@@ -123,13 +130,26 @@ export default function BillingPage() {
 
         <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
 
-        <label>Generate for:
+        <label>Date:
           <input type="date" value={genDate} onChange={e => setGenDate(e.target.value)} />
         </label>
         <button className="btn btn-primary btn-sm" onClick={generateBills} disabled={generating || !genDate}>
           {generating ? 'Generating…' : '⚡ Generate Bills'}
         </button>
         {genMsg && <span style={{ fontSize: 12, color: '#16a34a', fontWeight: 600 }}>{genMsg}</span>}
+
+        <div style={{ width: 1, height: 20, background: 'var(--border)', margin: '0 4px' }} />
+
+        <input type="text" placeholder="Account (blank = all)…" value={exportAcct} onChange={e => setExportAcct(e.target.value)}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 160 }} />
+        <button className="btn btn-secondary btn-sm" onClick={() => exportXlsx('tickets')} disabled={!genDate}
+          title="Download delivery tickets as Excel">
+          ⬇ Tickets XLSX
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => exportXlsx('inventory')} disabled={!genDate}
+          title="Download inventory sheets as Excel">
+          ⬇ Inventory XLSX
+        </button>
       </div>
 
       {error && <div className="error-message">{error}</div>}
