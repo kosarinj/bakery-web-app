@@ -273,15 +273,21 @@ export default function OrdersGrid() {
     , 0)
   , [visibleAccounts, visibleProducts, orderMap])
 
-  // Dollar total per column (units × wprice)
+  // Dollar total per column (units × wprice) — used when flipped=true
   const colDollarTotal = useCallback((col) => {
-    const arr = flipped ? visibleProducts : visibleAccounts
-    return arr.reduce((s, rowItem) => {
-      const [acct, prod] = flipped ? [col.name, rowItem.prod_name] : [rowItem.name, col.prod_name]
-      const entry = orderMap[`${acct}|${prod}`]
+    return visibleProducts.reduce((s, p) => {
+      const entry = orderMap[`${col.name}|${p.prod_name}`]
       return s + (entry?.units || 0) * (entry?.wprice || 0)
     }, 0)
-  }, [flipped, visibleAccounts, visibleProducts, orderMap])
+  }, [visibleProducts, orderMap])
+
+  // Dollar total per row — used when flipped=false (row = account)
+  const rowDollarTotal = useCallback((r) => {
+    return visibleProducts.reduce((s, p) => {
+      const entry = orderMap[`${r.name}|${p.prod_name}`]
+      return s + (entry?.units || 0) * (entry?.wprice || 0)
+    }, 0)
+  }, [visibleProducts, orderMap])
 
   const grandDollarTotal = useMemo(() =>
     visibleAccounts.reduce((s, a) =>
@@ -501,37 +507,42 @@ export default function OrdersGrid() {
                   )
                 })}
                 <th style={{ textAlign: 'right', minWidth: 60 }}>Total</th>
+                {!flipped && <>
+                  <th style={{ textAlign: 'right', minWidth: 60, background: 'var(--primary-light, #e8f0fe)', color: 'var(--primary)', fontSize: 12 }}># Items</th>
+                  <th style={{ textAlign: 'right', minWidth: 65, background: '#f0fdf4', color: '#16a34a', fontSize: 12 }}>$ Total</th>
+                </>}
               </tr>
             </thead>
             <tbody>
-              {/* ── Items summary row ── */}
-              <tr style={{ background: 'var(--primary-light, #e8f0fe)', fontWeight: 700 }}>
-                <td className="sticky-col" style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                  # Items
-                </td>
-                {cols.map(c => {
-                  const t = colTotal(c)
-                  return <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{t || ''}</td>
-                })}
-                <td className="total-cell" style={{ fontSize: 12, color: 'var(--primary)' }}>{grandTotal || ''}</td>
-              </tr>
-              {/* ── Dollar total row ── */}
-              <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
-                <td className="sticky-col" style={{ fontSize: 11, color: '#16a34a', fontWeight: 700, whiteSpace: 'nowrap' }}>
-                  $ Total
-                </td>
-                {cols.map(c => {
-                  const t = colDollarTotal(c)
-                  return (
-                    <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? '#16a34a' : 'var(--text-muted)' }}>
-                      {t > 0 ? `$${t.toFixed(0)}` : ''}
-                    </td>
-                  )
-                })}
-                <td className="total-cell" style={{ fontSize: 12, color: '#16a34a' }}>
-                  {grandDollarTotal > 0 ? `$${grandDollarTotal.toFixed(0)}` : ''}
-                </td>
-              </tr>
+              {/* ── Items + Dollar summary rows — only when products are columns (flipped=true) ── */}
+              {flipped && <>
+                <tr style={{ background: 'var(--primary-light, #e8f0fe)', fontWeight: 700 }}>
+                  <td className="sticky-col" style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    # Items
+                  </td>
+                  {cols.map(c => {
+                    const t = colTotal(c)
+                    return <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{t || ''}</td>
+                  })}
+                  <td className="total-cell" style={{ fontSize: 12, color: 'var(--primary)' }}>{grandTotal || ''}</td>
+                </tr>
+                <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
+                  <td className="sticky-col" style={{ fontSize: 11, color: '#16a34a', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                    $ Total
+                  </td>
+                  {cols.map(c => {
+                    const t = colDollarTotal(c)
+                    return (
+                      <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? '#16a34a' : 'var(--text-muted)' }}>
+                        {t > 0 ? `$${t.toFixed(0)}` : ''}
+                      </td>
+                    )
+                  })}
+                  <td className="total-cell" style={{ fontSize: 12, color: '#16a34a' }}>
+                    {grandDollarTotal > 0 ? `$${grandDollarTotal.toFixed(0)}` : ''}
+                  </td>
+                </tr>
+              </>}
               {rows.map(r => {
                 const rt = (flipped ? visibleAccounts : visibleProducts).reduce((s, c) => {
                   const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
@@ -562,6 +573,13 @@ export default function OrdersGrid() {
                       )
                     })}
                     <td className="total-cell">{rt || ''}</td>
+                    {!flipped && (() => {
+                      const dt = rowDollarTotal(r)
+                      return <>
+                        <td className="total-cell" style={{ background: 'var(--primary-light, #e8f0fe)', color: rt > 0 ? 'var(--primary)' : 'var(--text-muted)', fontWeight: 700, fontSize: 12 }}>{rt || ''}</td>
+                        <td className="total-cell" style={{ background: '#f0fdf4', color: dt > 0 ? '#16a34a' : 'var(--text-muted)', fontWeight: 700, fontSize: 12 }}>{dt > 0 ? `$${dt.toFixed(0)}` : ''}</td>
+                      </>
+                    })()}
                   </tr>
                 )
               })}
@@ -569,6 +587,10 @@ export default function OrdersGrid() {
                 <td className="sticky-col">Total</td>
                 {cols.map(c => <td key={colKey(c)} className="total-cell">{colTotal(c) || ''}</td>)}
                 <td className="total-cell">{grandTotal || ''}</td>
+                {!flipped && <>
+                  <td className="total-cell" style={{ background: 'var(--primary-light, #e8f0fe)', color: 'var(--primary)', fontWeight: 700 }}>{grandTotal || ''}</td>
+                  <td className="total-cell" style={{ background: '#f0fdf4', color: '#16a34a', fontWeight: 700 }}>{grandDollarTotal > 0 ? `$${grandDollarTotal.toFixed(0)}` : ''}</td>
+                </>}
               </tr>
             </tbody>
           </table>
