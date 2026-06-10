@@ -143,12 +143,20 @@ export default function BillingPage() {
         <input type="text" placeholder="Account (blank = all)…" value={exportAcct} onChange={e => setExportAcct(e.target.value)}
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 160 }} />
         <button className="btn btn-secondary btn-sm" onClick={() => exportXlsx('tickets')} disabled={!genDate}
-          title="Download delivery tickets as Excel">
-          ⬇ Tickets XLSX
+          title="Delivery invoices with pricing">
+          ⬇ Tickets
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => exportXlsx('packing')} disabled={!genDate}
+          title="Packing sheets — units and product only, no totals">
+          ⬇ Packing
         </button>
         <button className="btn btn-secondary btn-sm" onClick={() => exportXlsx('inventory')} disabled={!genDate}
-          title="Download inventory sheets as Excel">
-          ⬇ Inventory XLSX
+          title="Inventory sheets for end-of-day scanning">
+          ⬇ Inventory
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => window.open(`/api/billing/export/lead?del_date=${genDate}`, '_blank')} disabled={!genDate}
+          title="Lead sheet — accounts grouped by route for drivers">
+          ⬇ Lead Sheet
         </button>
       </div>
 

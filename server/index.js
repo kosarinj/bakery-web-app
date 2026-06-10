@@ -1324,6 +1324,188 @@ app.get('/api/billing/export/inventory', requireAuth, async (req, res) => {
   }
 })
 
+// Packing sheets export — same as tickets but no price/total columns, "Packing Sheet" title
+app.get('/api/billing/export/packing', requireAuth, async (req, res) => {
+  const { del_date, account: acctFilter } = req.query
+  if (!del_date) return res.status(400).json({ error: 'del_date required' })
+  try {
+    const ExcelJS = (await import('exceljs')).default
+
+    const { rows: sRows } = await query(`SELECT setting, value FROM settings WHERE setting IN ('bakery_name','bakery_address','bakery_phone')`)
+    const settings = Object.fromEntries(sRows.map(r => [r.setting, r.value]))
+    const bakeryName = settings.bakery_name || "Meredith's Country Bakery"
+    const bakeryAddr = settings.bakery_address || '415 Rte 28, Kingston, NY 12401'
+    const bakeryPhone = settings.bakery_phone || '(845) 331-4318'
+
+    const acctCond = acctFilter ? `AND TRIM(o.account) = $2` : ''
+    const acctVals = acctFilter ? [del_date, acctFilter] : [del_date]
+    const { rows: accounts } = await query(`
+      SELECT DISTINCT TRIM(o.account) AS account, a.route, a.sequence, a.acctgrp
+      FROM daily_orders o
+      LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
+      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      ${acctCond}
+      ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
+    `, acctVals)
+
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'Bakery Manager'
+    const hdrFont = { name: 'Arial', size: 8, bold: true }
+
+    for (const acct of accounts) {
+      const { rows: lines } = await query(`
+        SELECT o.prod_name, o.units, o.wprice, o.rprice, o.special_ords, p.prod_group
+        FROM daily_orders o
+        LEFT JOIN products p ON p.prod_name = o.prod_name
+        WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+          AND TRIM(o.account) = $2
+          AND o.units > 0
+        ORDER BY p.prod_group NULLS LAST, o.prod_name
+      `, [del_date, acct.account])
+
+      const sheetName = acct.account.replace(/[*?:/\\[\]]/g, '').slice(0, 31)
+      const ws = wb.addWorksheet(sheetName)
+      ws.getColumn(1).width = 7
+      ws.getColumn(2).width = 22
+      ws.getColumn(3).width = 13
+      ws.getColumn(4).width = 13
+
+      ws.getCell('E1').value = bakeryName + ' Packing Sheet'
+      ws.getCell('E2').value = bakeryAddr.split(',')[0] || '415 Rte 28'
+      ws.getCell('E3').value = bakeryAddr.split(',').slice(1).join(',').trim() || 'Kingston, NY 12401'
+      ws.getCell('E4').value = bakeryPhone
+      ;['E1','E2','E3','E4'].forEach(c => { ws.getCell(c).font = hdrFont })
+      ws.getCell('E1').font = { name: 'Arial', size: 9, bold: true }
+
+      ws.getCell('A5').value = del_date; ws.getCell('A5').numFmt = 'm/d/yyyy'
+      ws.getCell('A5').alignment = { horizontal: 'left' }
+      ws.getCell('A6').value = acct.account
+      ws.getCell('A6').font = { name: 'Arial', size: 9, bold: true }
+
+      const hdrRow = ws.getRow(7)
+      hdrRow.getCell(1).value = 'Units'
+      hdrRow.getCell(2).value = 'Product'
+      hdrRow.getCell(3).value = 'Wholesale/Unit'
+      hdrRow.getCell(4).value = 'Retail/Unit'
+      hdrRow.eachCell(c => { c.font = { name: 'Arial', size: 8, bold: true, color: { argb: 'FF8B0000' } }; c.border = { bottom: { style: 'thin' } } })
+
+      let row = 8, lastGroup = null, groupSubtot = 0, grandUnits = 0
+
+      for (const line of lines) {
+        const grp = line.prod_group || ''
+        if (lastGroup !== null && grp !== lastGroup) {
+          const sr = ws.getRow(row)
+          sr.getCell(1).value = groupSubtot
+          sr.getCell(1).font = { name: 'Arial', size: 8, bold: true, italic: true }
+          sr.getCell(1).alignment = { horizontal: 'right' }
+          sr.getCell(2).value = `  ── ${lastGroup} subtotal`
+          sr.getCell(2).font = { name: 'Arial', size: 8, italic: true, color: { argb: 'FF666666' } }
+          row++; groupSubtot = 0
+        }
+        const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
+        const dr = ws.getRow(row)
+        dr.getCell(1).value = units
+        dr.getCell(2).value = line.prod_name
+        dr.getCell(3).value = parseFloat(line.wprice) || 0
+        dr.getCell(4).value = parseFloat(line.rprice) || 0
+        dr.getCell(3).numFmt = '$#,##0.00'; dr.getCell(4).numFmt = '$#,##0.00'
+        dr.eachCell({ includeEmpty: false }, c => { c.font = hdrFont })
+        groupSubtot += units; grandUnits += units; lastGroup = grp; row++
+      }
+      if (lastGroup !== null) {
+        const sr = ws.getRow(row)
+        sr.getCell(1).value = groupSubtot
+        sr.getCell(1).font = { name: 'Arial', size: 8, bold: true, italic: true }
+        sr.getCell(2).value = `  ── ${lastGroup} subtotal`
+        sr.getCell(2).font = { name: 'Arial', size: 8, italic: true, color: { argb: 'FF666666' } }
+        row++
+      }
+      row++
+      const tr = ws.getRow(row)
+      tr.getCell(1).value = `Total   #${grandUnits}`
+      tr.eachCell({ includeEmpty: false }, c => { c.font = { name: 'Arial', size: 10, bold: true } })
+      tr.getCell(1).border = { top: { style: 'thin' } }
+    }
+
+    const filename = `packing_${del_date}${acctFilter ? '_' + acctFilter.replace(/\s+/g, '_') : ''}.xlsx`
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    await wb.xlsx.write(res)
+    res.end()
+  } catch (e) {
+    console.error('packing export error:', e)
+    if (!res.headersSent) res.status(500).json({ error: e.message })
+  }
+})
+
+// Lead sheets export — accounts grouped by route (driver summary list)
+app.get('/api/billing/export/lead', requireAuth, async (req, res) => {
+  const { del_date } = req.query
+  if (!del_date) return res.status(400).json({ error: 'del_date required' })
+  try {
+    const ExcelJS = (await import('exceljs')).default
+
+    const { rows: sRows } = await query(`SELECT setting, value FROM settings WHERE setting IN ('bakery_name')`)
+    const settings = Object.fromEntries(sRows.map(r => [r.setting, r.value]))
+    const bakeryName = settings.bakery_name || "Meredith's Country Bakery"
+
+    // Accounts with orders on this date, ordered by route then sequence
+    const { rows: accounts } = await query(`
+      SELECT DISTINCT TRIM(o.account) AS account,
+             COALESCE(a.route, 'No Route') AS route,
+             COALESCE(a.sequence, 9999) AS sequence
+      FROM daily_orders o
+      LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
+      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      ORDER BY COALESCE(a.route, 'No Route'), COALESCE(a.sequence, 9999), TRIM(o.account)
+    `, [del_date])
+
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'Bakery Manager'
+    const ws = wb.addWorksheet('Lead Sheet')
+    ws.getColumn(1).width = 40
+
+    // Header
+    ws.getCell('A1').value = `${bakeryName} — Lead Sheet`
+    ws.getCell('A1').font = { name: 'Arial', size: 14, bold: true }
+    ws.getCell('A2').value = `Delivery Date: ${del_date}`
+    ws.getCell('A2').font = { name: 'Arial', size: 10 }
+
+    let row = 4
+    let lastRoute = null
+
+    for (const acct of accounts) {
+      if (acct.route !== lastRoute) {
+        if (lastRoute !== null) row++ // blank line between routes
+        const rr = ws.getRow(row)
+        rr.getCell(1).value = `Route: ${acct.route}`
+        rr.getCell(1).font = { name: 'Arial', size: 16, bold: true, color: { argb: 'FF8B0000' } }
+        rr.getCell(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FFFFF0F0' } }
+        ws.getRow(row).height = 28
+        row++
+        // underline separator
+        ws.getRow(row).getCell(1).border = { bottom: { style: 'medium' } }
+        row++
+        lastRoute = acct.route
+      }
+      const ar = ws.getRow(row)
+      ar.getCell(1).value = acct.account
+      ar.getCell(1).font = { name: 'Arial', size: 14, bold: true }
+      ws.getRow(row).height = 24
+      row++
+    }
+
+    const filename = `lead_sheet_${del_date}.xlsx`
+    res.setHeader('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+    res.setHeader('Content-Disposition', `attachment; filename="${filename}"`)
+    await wb.xlsx.write(res)
+    res.end()
+  } catch (e) {
+    console.error('lead sheet export error:', e)
+    if (!res.headersSent) res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Recipe Generator ──────────────────────────────────────────────────────
 
 function scaleIngredients(rows, factor) {
