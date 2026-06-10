@@ -160,7 +160,7 @@ export default function OrdersGrid() {
         const map = {}
         const ddMap = {}
         ;(Array.isArray(orders) ? orders : []).forEach(o => {
-          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
+          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0, wprice: parseFloat(o.wprice) || 0 }
           if (o.del_date && !ddMap[o.account]) ddMap[o.account] = String(o.del_date).slice(0, 10)
         })
         // Seed missing accounts from account.next_del
@@ -180,7 +180,7 @@ export default function OrdersGrid() {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
           body: JSON.stringify({ units })
         })
-        const updated = { ...orderMapRef.current, [key]: { ...existing, units } }
+        const updated = { ...orderMapRef.current, [key]: { ...existing, units, wprice: existing.wprice || 0 } }
         orderMapRef.current = updated; setOrderMap(updated)
       } else {
         const r = await fetch('/api/orders', {
@@ -270,6 +270,25 @@ export default function OrdersGrid() {
   const grandTotal = useMemo(() =>
     visibleAccounts.reduce((s, a) =>
       s + visibleProducts.reduce((ss, p) => ss + (orderMap[`${a.name}|${p.prod_name}`]?.units || 0), 0)
+    , 0)
+  , [visibleAccounts, visibleProducts, orderMap])
+
+  // Dollar total per column (units × wprice)
+  const colDollarTotal = useCallback((col) => {
+    const arr = flipped ? visibleProducts : visibleAccounts
+    return arr.reduce((s, rowItem) => {
+      const [acct, prod] = flipped ? [col.name, rowItem.prod_name] : [rowItem.name, col.prod_name]
+      const entry = orderMap[`${acct}|${prod}`]
+      return s + (entry?.units || 0) * (entry?.wprice || 0)
+    }, 0)
+  }, [flipped, visibleAccounts, visibleProducts, orderMap])
+
+  const grandDollarTotal = useMemo(() =>
+    visibleAccounts.reduce((s, a) =>
+      s + visibleProducts.reduce((ss, p) => {
+        const e = orderMap[`${a.name}|${p.prod_name}`]
+        return ss + (e?.units || 0) * (e?.wprice || 0)
+      }, 0)
     , 0)
   , [visibleAccounts, visibleProducts, orderMap])
 
@@ -485,6 +504,34 @@ export default function OrdersGrid() {
               </tr>
             </thead>
             <tbody>
+              {/* ── Items summary row ── */}
+              <tr style={{ background: 'var(--primary-light, #e8f0fe)', fontWeight: 700 }}>
+                <td className="sticky-col" style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  # Items
+                </td>
+                {cols.map(c => {
+                  const t = colTotal(c)
+                  return <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{t || ''}</td>
+                })}
+                <td className="total-cell" style={{ fontSize: 12, color: 'var(--primary)' }}>{grandTotal || ''}</td>
+              </tr>
+              {/* ── Dollar total row ── */}
+              <tr style={{ background: '#f0fdf4', fontWeight: 700 }}>
+                <td className="sticky-col" style={{ fontSize: 11, color: '#16a34a', fontWeight: 700, whiteSpace: 'nowrap' }}>
+                  $ Total
+                </td>
+                {cols.map(c => {
+                  const t = colDollarTotal(c)
+                  return (
+                    <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? '#16a34a' : 'var(--text-muted)' }}>
+                      {t > 0 ? `$${t.toFixed(0)}` : ''}
+                    </td>
+                  )
+                })}
+                <td className="total-cell" style={{ fontSize: 12, color: '#16a34a' }}>
+                  {grandDollarTotal > 0 ? `$${grandDollarTotal.toFixed(0)}` : ''}
+                </td>
+              </tr>
               {rows.map(r => {
                 const rt = (flipped ? visibleAccounts : visibleProducts).reduce((s, c) => {
                   const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
