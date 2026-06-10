@@ -433,11 +433,21 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
   try {
     const { rows } = await query(`
       INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, del_date, last_update)
-      SELECT f.prod_name, f.account, f.units, f.wprice, f.rprice, $2::date, a.next_del, NOW()
+      SELECT f.prod_name, f.account,
+             GREATEST(0, f.units
+               - COALESCE(f.special_ords, 0)
+               - COALESCE(f.postbake_adj, 0)) AS units,
+             f.wprice, f.rprice,
+             $2::date,
+             $2::date + COALESCE(a.postord::int, 0),
+             NOW()
       FROM daily_orders f
       JOIN accounts a ON a.name = f.account
       WHERE f.ordr_dt = $1
         ${hasAcctFilter ? 'AND f.account = ANY($3::text[])' : ''}
+        AND GREATEST(0, f.units
+              - COALESCE(f.special_ords, 0)
+              - COALESCE(f.postbake_adj, 0)) > 0
         AND NOT EXISTS (
           SELECT 1 FROM daily_orders e
           WHERE e.prod_name = f.prod_name
@@ -809,6 +819,16 @@ app.post('/api/spec-orders', requireAuth, async (req, res) => {
       INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *
     `, [account, location, ordr_dt, del_date || null, prod_name, units || 0, price || 0, phone, notes])
+
+    // Sync special_ords onto the matching daily_orders row (same account+product+date)
+    if (account && prod_name && ordr_dt && (units || 0) > 0) {
+      await query(`
+        UPDATE daily_orders
+        SET special_ords = COALESCE(special_ords, 0) + $1, last_update = NOW()
+        WHERE account = $2 AND prod_name = $3 AND ordr_dt = $4::date
+      `, [units || 0, account, prod_name, ordr_dt])
+    }
+
     res.json(rows[0])
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -819,14 +839,49 @@ app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   vals.push(req.params.id)
   try {
+    // Fetch old row first so we can compute the unit delta
+    const { rows: old } = await query('SELECT account, prod_name, ordr_dt, units FROM spec_orders WHERE id=$1', [req.params.id])
     await query(`UPDATE spec_orders SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)
+
+    // Sync special_ords delta onto daily_orders
+    if (old.length && req.body.units !== undefined) {
+      const oldUnits = parseFloat(old[0].units) || 0
+      const newUnits = parseFloat(req.body.units) || 0
+      const delta = newUnits - oldUnits
+      const row = old[0]
+      const acct    = req.body.account    || row.account
+      const prod    = req.body.prod_name  || row.prod_name
+      const ordrDt  = req.body.ordr_dt    || row.ordr_dt
+      if (delta !== 0 && acct && prod && ordrDt) {
+        await query(`
+          UPDATE daily_orders
+          SET special_ords = GREATEST(0, COALESCE(special_ords, 0) + $1), last_update = NOW()
+          WHERE account = $2 AND prod_name = $3 AND ordr_dt = $4::date
+        `, [delta, acct, prod, ordrDt])
+      }
+    }
     res.json({ success: true })
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
 
 app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
-  await query('DELETE FROM spec_orders WHERE id=$1', [req.params.id])
-  res.json({ success: true })
+  try {
+    // Fetch before deleting so we can subtract from daily_orders
+    const { rows: old } = await query('SELECT account, prod_name, ordr_dt, units FROM spec_orders WHERE id=$1', [req.params.id])
+    await query('DELETE FROM spec_orders WHERE id=$1', [req.params.id])
+    if (old.length) {
+      const { account, prod_name, ordr_dt, units } = old[0]
+      const u = parseFloat(units) || 0
+      if (u > 0 && account && prod_name && ordr_dt) {
+        await query(`
+          UPDATE daily_orders
+          SET special_ords = GREATEST(0, COALESCE(special_ords, 0) - $1), last_update = NOW()
+          WHERE account = $2 AND prod_name = $3 AND ordr_dt = $4::date
+        `, [u, account, prod_name, ordr_dt])
+      }
+    }
+    res.json({ success: true })
+  } catch (e) { res.status(400).json({ error: e.message }) }
 })
 
 // Copy special orders from one date to another (skip if order already exists for that account+product+date)
