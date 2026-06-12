@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
 
-const EMPTY = { account: '', location: '', prod_name: '', units: 0, price: 0, del_date: '', phone: '', notes: '' }
+const EMPTY = { account: '', cust_name: '', location: '', prod_name: '', units: 0, price: 0, del_date: '', phone: '', notes: '' }
 
 const CAL_MONTHS = ['January','February','March','April','May','June','July','August','September','October','November','December']
 const CAL_DAYS   = ['Su','Mo','Tu','We','Th','Fr','Sa']
@@ -113,6 +113,7 @@ export default function SpecialOrders() {
   const [orders, setOrders]     = useState([])
   const [accounts, setAccounts] = useState([])
   const [products, setProducts] = useState([])
+  const [locations, setLocations] = useState([])
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
   const [newRow, setNewRow]     = useState(EMPTY)
@@ -121,10 +122,11 @@ export default function SpecialOrders() {
   const [showCal, setShowCal]   = useState(false)
 
   // Copy/repeat state
-  const [copyFrom, setCopyFrom]   = useState('')
-  const [copyTo, setCopyTo]       = useState('')
-  const [copying, setCopying]     = useState(false)
-  const [copyMsg, setCopyMsg]     = useState('')
+  const [copyFrom, setCopyFrom]       = useState('')
+  const [copyTo, setCopyTo]           = useState('')
+  const [copyLocation, setCopyLocation] = useState('')
+  const [copying, setCopying]         = useState(false)
+  const [copyMsg, setCopyMsg]         = useState('')
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' }).then(r => r.json())
@@ -140,10 +142,12 @@ export default function SpecialOrders() {
       fetch('/api/accounts', { credentials: 'include' }).then(r => r.json()),
       fetch('/api/products', { credentials: 'include' }).then(r => r.json()),
       fetch('/api/spec-orders/dates', { credentials: 'include' }).then(r => r.json()),
-    ]).then(([a, p, d]) => {
+      fetch('/api/spec-orders/locations', { credentials: 'include' }).then(r => r.json()),
+    ]).then(([a, p, d, locs]) => {
       setAccounts(Array.isArray(a) ? a : [])
       setProducts(Array.isArray(p) ? p : [])
       setDates(Array.isArray(d) ? d : [])
+      setLocations(Array.isArray(locs) ? locs : [])
     })
   }, [])
 
@@ -193,7 +197,7 @@ export default function SpecialOrders() {
     try {
       const r = await fetch('/api/spec-orders/copy', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo })
+        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, ...(copyLocation ? { location: copyLocation } : {}) })
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
@@ -227,6 +231,15 @@ export default function SpecialOrders() {
         <label>Copy from: <input type="date" value={copyFrom} onChange={e => setCopyFrom(e.target.value)} /></label>
         <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>→</span>
         <label>To: <input type="date" value={copyTo} onChange={e => setCopyTo(e.target.value)} /></label>
+        {locations.length > 0 && (
+          <label>Location:
+            <select value={copyLocation} onChange={e => setCopyLocation(e.target.value)}
+              style={{ marginLeft: 4, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13, background: copyLocation ? 'var(--primary-light)' : 'var(--surface)' }}>
+              <option value="">All locations</option>
+              {locations.map(l => <option key={l} value={l}>{l}</option>)}
+            </select>
+          </label>
+        )}
         <button className="btn btn-secondary btn-sm" onClick={repeatOrders}
           disabled={copying || !copyFrom || !copyTo || copyFrom === copyTo}>
           {copying ? 'Copying…' : '⬇ Repeat Special Orders'}
@@ -257,10 +270,11 @@ export default function SpecialOrders() {
         <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? <div className="loading">Loading…</div> : (
             <div className="grid-scroll-container">
-              <table className="data-grid" style={{ minWidth: 900 }}>
+              <table className="data-grid" style={{ minWidth: 1050 }}>
                 <thead>
                   <tr>
                     <th style={{ minWidth: 140 }}>Account</th>
+                    <th style={{ minWidth: 120 }}>Customer</th>
                     <th style={{ minWidth: 120 }}>Location</th>
                     <th style={{ minWidth: 160 }}>Product</th>
                     <th style={{ minWidth: 70, textAlign: 'right' }}>Units</th>
@@ -275,6 +289,7 @@ export default function SpecialOrders() {
                   {orders.map(o => (
                     <tr key={o.id}>
                       <td style={{ fontWeight: 500 }}>{o.account}</td>
+                      <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.location||''} onSave={v=>save(o.id,'location',v)} type="text" align="left" /></td>
                       <td style={{ fontWeight: 500 }}>{o.prod_name}</td>
                       <td><EditableCell value={parseFloat(o.units)||0} onSave={v=>save(o.id,'units',v)} type="number" align="right" /></td>
@@ -302,9 +317,17 @@ export default function SpecialOrders() {
                         </select>
                       </td>
                       <td>
-                        <input type="text" placeholder="Location" value={newRow.location}
+                        <input type="text" placeholder="Customer name" value={newRow.cust_name}
+                          onChange={e => setNewRow(p => ({ ...p, cust_name: e.target.value }))}
+                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
+                      </td>
+                      <td>
+                        <input type="text" placeholder="Location" value={newRow.location} list="spec-locations"
                           onChange={e => setNewRow(p => ({ ...p, location: e.target.value }))}
                           style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
+                        <datalist id="spec-locations">
+                          {locations.map(l => <option key={l} value={l} />)}
+                        </datalist>
                       </td>
                       <td>
                         <select value={newRow.prod_name} onChange={e => setNewRow(p => ({ ...p, prod_name: e.target.value }))}
@@ -344,7 +367,7 @@ export default function SpecialOrders() {
                   )}
 
                   {orders.length === 0 && !adding && (
-                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                    <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                       No special orders for {date}.
                       {dates.length > 0 && !showCal && <span> Click <strong>Calendar</strong> to browse dates with orders.</span>}
                     </td></tr>
@@ -352,7 +375,7 @@ export default function SpecialOrders() {
 
                   {orders.length > 0 && (
                     <tr className="totals-row">
-                      <td colSpan={3}>Total</td>
+                      <td colSpan={4}>Total</td>
                       <td className="total-cell">{totalUnits}</td>
                       <td className="total-cell">${totalRev.toFixed(2)}</td>
                       <td colSpan={4}></td>

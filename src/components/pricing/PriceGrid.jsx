@@ -7,6 +7,8 @@ export default function PriceGrid() {
   const [selectedAccount, setSelectedAccount] = useState('')
   const [acctPrices, setAcctPrices] = useState({})
   const [search, setSearch] = useState('')
+  const [filterGroup, setFilterGroup] = useState('')
+  const [filterProd, setFilterProd] = useState('')
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [mode, setMode] = useState('standard')  // 'standard' | 'account'
@@ -84,9 +86,14 @@ export default function PriceGrid() {
 
   if (loading) return <div className="loading">Loading prices...</div>
 
-  const filteredRows = search
-    ? rows.filter(r => (r.prod_name||'').toLowerCase().includes(search.toLowerCase()) || (r.prod_group||'').toLowerCase().includes(search.toLowerCase()))
-    : rows
+  const allGroups = [...new Set(rows.map(r => r.prod_group).filter(Boolean))].sort()
+  const filteredRows = rows.filter(r => {
+    if (filterGroup && r.prod_group !== filterGroup) return false
+    if (filterProd && r.prod_name !== filterProd) return false
+    if (search && !(r.prod_name||'').toLowerCase().includes(search.toLowerCase()) && !(r.prod_group||'').toLowerCase().includes(search.toLowerCase())) return false
+    return true
+  })
+  const groupProducts = rows.filter(r => !filterGroup || r.prod_group === filterGroup)
 
   const groups = filteredRows.reduce((acc, r) => {
     const g = r.prod_group || 'Other'
@@ -122,8 +129,18 @@ export default function PriceGrid() {
           </label>
         )}
 
-        <input type="text" placeholder="Search products…" value={search} onChange={e => setSearch(e.target.value)}
-          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 180 }} />
+        <select value={filterGroup} onChange={e => { setFilterGroup(e.target.value); setFilterProd('') }}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, background: filterGroup ? 'var(--primary-light)' : 'var(--surface)' }}>
+          <option value="">All categories</option>
+          {allGroups.map(g => <option key={g} value={g}>{g}</option>)}
+        </select>
+        <select value={filterProd} onChange={e => setFilterProd(e.target.value)}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, background: filterProd ? 'var(--primary-light)' : 'var(--surface)', maxWidth: 200 }}>
+          <option value="">All products</option>
+          {groupProducts.map(r => <option key={r.prod_name} value={r.prod_name}>{r.prod_name}</option>)}
+        </select>
+        <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)}
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 130 }} />
         <span className="toolbar-info">{filteredRows.length} of {rows.length}</span>
       </div>
 

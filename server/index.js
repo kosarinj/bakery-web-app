@@ -785,6 +785,13 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
 
 // ─── Special Orders ────────────────────────────────────────────────────────
 
+app.get('/api/spec-orders/locations', requireAuth, async (req, res) => {
+  const { rows } = await query(
+    `SELECT DISTINCT location FROM spec_orders WHERE location IS NOT NULL AND location <> '' ORDER BY location`
+  )
+  res.json(rows.map(r => r.location))
+})
+
 app.get('/api/spec-orders/dates', requireAuth, async (req, res) => {
   const { rows } = await query(`
     SELECT ordr_dt::text AS date, COUNT(*) AS count
@@ -813,12 +820,12 @@ app.get('/api/spec-orders', requireAuth, async (req, res) => {
 })
 
 app.post('/api/spec-orders', requireAuth, async (req, res) => {
-  const { account, location, ordr_dt, del_date, prod_name, units, price, phone, notes } = req.body
+  const { account, cust_name, location, ordr_dt, del_date, prod_name, units, price, phone, notes } = req.body
   try {
     const { rows } = await query(`
-      INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
-      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *
-    `, [account, location, ordr_dt, del_date || null, prod_name, units || 0, price || 0, phone, notes])
+      INSERT INTO spec_orders(account,cust_name,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW()) RETURNING *
+    `, [account, cust_name || null, location, ordr_dt, del_date || null, prod_name, units || 0, price || 0, phone, notes])
 
     // Sync special_ords onto the matching daily_orders row (same account+product+date)
     if (account && prod_name && ordr_dt && (units || 0) > 0) {
@@ -834,7 +841,7 @@ app.post('/api/spec-orders', requireAuth, async (req, res) => {
 })
 
 app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
-  const fields = ['account','location','ordr_dt','del_date','prod_name','units','price','phone','notes']
+  const fields = ['account','cust_name','location','ordr_dt','del_date','prod_name','units','price','phone','notes']
   const updates = ['last_update=NOW()'], vals = []
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   vals.push(req.params.id)
@@ -886,21 +893,26 @@ app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
 
 // Copy special orders from one date to another (skip if order already exists for that account+product+date)
 app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
-  const { from_date, to_date, accounts } = req.body
+  const { from_date, to_date, accounts, location } = req.body
   if (!from_date || !to_date) return res.status(400).json({ error: 'from_date and to_date required' })
   const hasAcctFilter = Array.isArray(accounts) && accounts.length > 0
+  const hasLocFilter  = !!location
+  const params = [from_date, to_date]
+  let extraWhere = ''
+  if (hasLocFilter)  { params.push(location);  extraWhere += ` AND s.location = $${params.length}` }
+  if (hasAcctFilter) { params.push(accounts);  extraWhere += ` AND s.account = ANY($${params.length}::text[])` }
   try {
     const { rows } = await query(`
-      INSERT INTO spec_orders(account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
-      SELECT s.account, s.location, $2::date, s.del_date, s.prod_name, s.units, s.price, s.phone, s.notes, NOW()
+      INSERT INTO spec_orders(account,cust_name,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+      SELECT s.account, s.cust_name, s.location, $2::date, s.del_date, s.prod_name, s.units, s.price, s.phone, s.notes, NOW()
       FROM spec_orders s
       WHERE s.ordr_dt = $1
-        ${hasAcctFilter ? 'AND s.account = ANY($3::text[])' : ''}
+        ${extraWhere}
         AND NOT EXISTS (
           SELECT 1 FROM spec_orders e WHERE e.account=s.account AND e.prod_name=s.prod_name AND e.ordr_dt=$2::date
         )
       RETURNING *
-    `, hasAcctFilter ? [from_date, to_date, accounts] : [from_date, to_date])
+    `, params)
     await logActivity(req, 'repeat_spec_orders', `Copied ${rows.length} special orders from ${from_date} to ${to_date}`)
     res.json({ copied: rows.length, rows })
   } catch (e) {
@@ -2195,6 +2207,8 @@ app.use(express.static(join(__dirname, '../dist')))
 app.get('*', (_req, res) => res.sendFile(join(__dirname, '../dist/index.html')))
 
 // ─── Start ─────────────────────────────────────────────────────────────────
+
+pool.query('ALTER TABLE spec_orders ADD COLUMN IF NOT EXISTS cust_name text').catch(console.error)
 
 app.listen(PORT, () => {
   console.log(`Bakery server running on port ${PORT}`)
