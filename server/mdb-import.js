@@ -72,8 +72,15 @@ async function chunkInsert(rows, chunkSize, insertFn) {
   return imported
 }
 
+// Deduplicate rows, keeping the last value for each unique key (handles MDB duplicate records)
+function dedup(rows, keyFn) {
+  const map = new Map()
+  for (const r of rows) map.set(keyFn(r), r)
+  return [...map.values()]
+}
+
 export async function importAccounts(tbl, q) {
-  const rows = tbl('Account').map(r => ({
+  const rawRows = tbl('Account').map(r => ({
     name:         mstr(r.name),
     acct_id:      mnum(r.account),
     acctgrp:      mstr(r.acctgrp),
@@ -109,7 +116,7 @@ export async function importAccounts(tbl, q) {
     webend:       midate(r.webend),
     adj_level:    mnum(r.adj_level) ?? 0,
   })).filter(r => r.name)
-
+  const rows = dedup(rawRows, r => r.name)
   const cols = Object.keys(rows[0] || {})
   const upd  = cols.filter(c => c !== 'name').map(c => `${c}=EXCLUDED.${c}`).join(',')
   return chunkInsert(rows, 100, async chunk => {
@@ -120,7 +127,7 @@ export async function importAccounts(tbl, q) {
 }
 
 export async function importProducts(tbl, q) {
-  const rows = tbl('Product').map(r => ({
+  const rawRows = tbl('Product').map(r => ({
     prod_name:    mstr(r.prod_name),
     prod_id:      mnum(r.prod_ID ?? r.prod_id),
     prod_type:    mstr(r.prod_type),
@@ -148,6 +155,7 @@ export async function importProducts(tbl, q) {
     webtype:      mstr(r.webtype),
     gluten_free:  mbool(r.gluten_free),
   })).filter(r => r.prod_name)
+  const rows = dedup(rawRows, r => r.prod_name)
 
   const cols = Object.keys(rows[0] || {})
   const upd  = cols.filter(c => c !== 'prod_name').map(c => `${c}=EXCLUDED.${c}`).join(',')
@@ -161,43 +169,63 @@ export async function importProducts(tbl, q) {
 }
 
 export async function importPrices(tbl, q) {
-  const rows = tbl('Price').map(r => ({
-    prod_name:   mstr(r.prod_name),
-    category:    mstr(r.category) ?? 'wholesale',
-    whole_price: mnum(r.whole_price) ?? 0,
-    ret_price:   mnum(r.ret_price)   ?? 0,
-  })).filter(r => r.prod_name && r.category)
+  const rows = dedup(
+    tbl('Price').map(r => ({
+      prod_name:   mstr(r.prod_name),
+      category:    mstr(r.category) ?? 'wholesale',
+      whole_price: mnum(r.whole_price) ?? 0,
+      ret_price:   mnum(r.ret_price)   ?? 0,
+    })).filter(r => r.prod_name && r.category),
+    r => `${r.prod_name}|${r.category}`
+  )
 
   return chunkInsert(rows, 200, async chunk => {
     const vals = chunk.flatMap(r => [r.prod_name, r.category, r.whole_price, r.ret_price])
-    const ph   = chunk.map((_, i) => `($${i*4+1},$${i*4+2},$${i*4+3},$${i*4+4})`).join(',')
-    await q(`INSERT INTO prices(prod_name,category,whole_price,ret_price) VALUES ${ph}
-             ON CONFLICT (prod_name,category) DO UPDATE SET whole_price=EXCLUDED.whole_price, ret_price=EXCLUDED.ret_price`, vals)
+    const ph   = chunk.map((_, i) => `($${i*4+1},$${i*4+2},$${i*4+3}::numeric,$${i*4+4}::numeric)`).join(',')
+    await q(`
+      INSERT INTO prices(prod_name,category,whole_price,ret_price)
+      SELECT v.prod_name, v.category, v.whole_price, v.ret_price
+      FROM (VALUES ${ph}) AS v(prod_name,category,whole_price,ret_price)
+      WHERE EXISTS (SELECT 1 FROM products p WHERE p.prod_name = v.prod_name)
+      ON CONFLICT (prod_name,category) DO UPDATE SET whole_price=EXCLUDED.whole_price, ret_price=EXCLUDED.ret_price
+    `, vals)
   })
 }
 
 export async function importAccountPrices(tbl, q) {
-  const rows = tbl('Account_price').map(r => ({
-    account:   mstr(r.account),
-    prod_name: mstr(r.prod_name),
-    ret_price: mnum(r.retail_price) ?? 0,
-  })).filter(r => r.account && r.prod_name)
+  const rows = dedup(
+    tbl('Account_price').map(r => ({
+      account:   mstr(r.account),
+      prod_name: mstr(r.prod_name),
+      ret_price: mnum(r.retail_price) ?? 0,
+    })).filter(r => r.account && r.prod_name),
+    r => `${r.account}|${r.prod_name}`
+  )
 
   return chunkInsert(rows, 200, async chunk => {
     const vals = chunk.flatMap(r => [r.account, r.prod_name, r.ret_price])
-    const ph   = chunk.map((_, i) => `($${i*3+1},$${i*3+2},$${i*3+3})`).join(',')
-    await q(`INSERT INTO account_prices(account,prod_name,ret_price) VALUES ${ph}
-             ON CONFLICT (account,prod_name) DO UPDATE SET ret_price=EXCLUDED.ret_price`, vals)
+    const ph   = chunk.map((_, i) => `($${i*3+1},$${i*3+2},$${i*3+3}::numeric)`).join(',')
+    await q(`
+      INSERT INTO account_prices(account,prod_name,ret_price)
+      SELECT v.account, v.prod_name, v.ret_price
+      FROM (VALUES ${ph}) AS v(account,prod_name,ret_price)
+      WHERE EXISTS (SELECT 1 FROM accounts a WHERE a.name = v.account)
+        AND EXISTS (SELECT 1 FROM products p WHERE p.prod_name = v.prod_name)
+      ON CONFLICT (account,prod_name) DO UPDATE SET ret_price=EXCLUDED.ret_price
+    `, vals)
   })
 }
 
 export async function importIngredients(tbl, q) {
-  const rows = tbl('ingredients').map(r => ({
-    name:        mstr(r.ingredient),
-    cost_cup:    mnum(r.cost_cup),
-    cost_pound:  mnum(r.cost_pound),
-    cup_pound:   mnum(r.cup_pound),
-  })).filter(r => r.name)
+  const rows = dedup(
+    tbl('ingredients').map(r => ({
+      name:        mstr(r.ingredient),
+      cost_cup:    mnum(r.cost_cup),
+      cost_pound:  mnum(r.cost_pound),
+      cup_pound:   mnum(r.cup_pound),
+    })).filter(r => r.name),
+    r => r.name
+  )
 
   return chunkInsert(rows, 200, async chunk => {
     const vals = chunk.flatMap(r => [r.name, r.cost_cup, r.cost_pound, r.cup_pound])
@@ -208,19 +236,22 @@ export async function importIngredients(tbl, q) {
 }
 
 export async function importRecipes(tbl, q) {
-  const rows = tbl('new_recipe').map(r => ({
-    product:     mstr(r.product),
-    ingredient:  mstr(r.ingredient) || null,
-    sequence:    mnum(r.sequence) ?? 0,
-    rectext:     mstr(r.rectext),
-    teaspoons:   mnum(r.teaspoons)   ?? 0,
-    tablespoons: mnum(r.tablespoons) ?? 0,
-    cups:        mnum(r.cups)        ?? 0,
-    pounds:      mnum(r.pounds)      ?? 0,
-    space:       mbool(r.space),
-    rec_group:   mbool(r.rec_group),
-    qty:         mnum(r.qty),
-  })).filter(r => r.product)
+  const rows = dedup(
+    tbl('new_recipe').map(r => ({
+      product:     mstr(r.product),
+      ingredient:  mstr(r.ingredient) || null,
+      sequence:    mnum(r.sequence) ?? 0,
+      rectext:     mstr(r.rectext),
+      teaspoons:   mnum(r.teaspoons)   ?? 0,
+      tablespoons: mnum(r.tablespoons) ?? 0,
+      cups:        mnum(r.cups)        ?? 0,
+      pounds:      mnum(r.pounds)      ?? 0,
+      space:       mbool(r.space),
+      rec_group:   mbool(r.rec_group),
+      qty:         mnum(r.qty),
+    })).filter(r => r.product),
+    r => `${r.product}|${r.ingredient ?? '\0'}|${r.sequence}`
+  )
 
   const products = [...new Set(rows.map(r => r.product))]
   if (products.length) {
@@ -231,23 +262,31 @@ export async function importRecipes(tbl, q) {
   return chunkInsert(rows, 200, async chunk => {
     const vals = chunk.flatMap(r => cols.map(c => r[c]))
     const ph   = chunk.map((_, i) => '(' + cols.map((_, j) => `$${i*cols.length+j+1}`).join(',') + ')').join(',')
-    await q(`INSERT INTO recipes(${cols.join(',')}) VALUES ${ph}`, vals)
+    await q(`INSERT INTO recipes(${cols.join(',')}) VALUES ${ph} ON CONFLICT DO NOTHING`, vals)
   })
 }
 
 export async function importInventory(tbl, q) {
-  const rows = tbl('Inventory').map(r => ({
-    prod_name: mstr(r.prod_name),
-    units:     mnum(r.units)   ?? 0,
-    sod_inv:   mnum(r.sod_inv) ?? 0,
-    location:  mstr(r.location),
-  })).filter(r => r.prod_name)
+  const rows = dedup(
+    tbl('Inventory').map(r => ({
+      prod_name: mstr(r.prod_name),
+      units:     mnum(r.units)   ?? 0,
+      sod_inv:   mnum(r.sod_inv) ?? 0,
+      location:  mstr(r.location),
+    })).filter(r => r.prod_name),
+    r => r.prod_name
+  )
 
   return chunkInsert(rows, 200, async chunk => {
     const vals = chunk.flatMap(r => [r.prod_name, r.units, r.sod_inv, r.location])
-    const ph   = chunk.map((_, i) => `($${i*4+1},$${i*4+2},$${i*4+3},$${i*4+4})`).join(',')
-    await q(`INSERT INTO inventory(prod_name,units,sod_inv,location) VALUES ${ph}
-             ON CONFLICT (prod_name) DO UPDATE SET units=EXCLUDED.units, sod_inv=EXCLUDED.sod_inv, location=EXCLUDED.location`, vals)
+    const ph   = chunk.map((_, i) => `($${i*4+1},$${i*4+2}::numeric,$${i*4+3}::numeric,$${i*4+4})`).join(',')
+    await q(`
+      INSERT INTO inventory(prod_name,units,sod_inv,location)
+      SELECT v.prod_name, v.units, v.sod_inv, v.location
+      FROM (VALUES ${ph}) AS v(prod_name,units,sod_inv,location)
+      WHERE EXISTS (SELECT 1 FROM products p WHERE p.prod_name = v.prod_name)
+      ON CONFLICT (prod_name) DO UPDATE SET units=EXCLUDED.units, sod_inv=EXCLUDED.sod_inv, location=EXCLUDED.location
+    `, vals)
   })
 }
 
