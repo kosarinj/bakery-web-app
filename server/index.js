@@ -2174,6 +2174,33 @@ app.post('/api/access/import/:table', requireAuth, async (req, res) => {
   }
 })
 
+// DELETE /api/access/truncate/:table — wipe a table before a replace-mode import
+const TRUNCATE_TABLE_MAP = {
+  accounts:        'accounts',
+  products:        'products',
+  prices:          'prices',
+  account_prices:  'account_prices',
+  ingredients:     'ingredients',
+  recipes:         'recipes',
+  inventory:       'inventory',
+  spec_orders:     'spec_orders',
+  track_tix:       'track_tix',
+  order_history:   'daily_orders',
+  extras:          'daily_orders',
+  daily_inventory: 'daily_inventory',
+}
+app.delete('/api/access/truncate/:table', requireAuth, async (req, res) => {
+  const dbTable = TRUNCATE_TABLE_MAP[req.params.table]
+  if (!dbTable) return res.status(400).json({ error: `Unknown table: ${req.params.table}` })
+  try {
+    const { rowCount } = await query(`DELETE FROM ${dbTable}`)
+    await logActivity(req, 'access_truncate', `Cleared ${rowCount} rows from ${dbTable} before replace import`)
+    res.json({ cleared: rowCount, table: dbTable })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // POST /api/access/import-rows/:table — browser sends raw MDB rows as CSV; server transforms + inserts
 // The CSV uses original MDB column names so the server importers can apply their own field mapping.
 app.post('/api/access/import-rows/:table', requireAuth, async (req, res) => {

@@ -156,14 +156,15 @@ function rowsToCSV(rows) {
 
 function AccessDBPanel() {
   const fileRef = useRef(null)
-  const [db, setDb]           = useState(null)
+  const [db, setDb]             = useState(null)
   const [fileName, setFileName] = useState('')
-  const [loading, setLoading] = useState(false)
-  const [loadMsg, setLoadMsg] = useState('')
+  const [loading, setLoading]   = useState(false)
+  const [loadMsg, setLoadMsg]   = useState('')
   const [loadError, setLoadError] = useState('')
   const [tableInfo, setTableInfo] = useState([])
-  const [busy, setBusy]       = useState({})
-  const [results, setResults] = useState({})
+  const [busy, setBusy]         = useState({})
+  const [results, setResults]   = useState({})
+  const [replaceMode, setReplaceMode] = useState(false)
 
   async function handleFile(e) {
     const file = e.target.files[0]
@@ -193,19 +194,31 @@ function AccessDBPanel() {
     } finally { setLoading(false) }
   }
 
-  async function importTable(key) {
+  async function importTable(key, skipConfirm = false) {
     if (!db) return
     const cfg = MDB_TABLE_MAP[key]
+
+    if (replaceMode && !skipConfirm) {
+      if (!confirm(`REPLACE MODE: This will DELETE all existing rows in "${cfg.label}" before importing.\n\nContinue?`)) return
+    }
+
     setBusy(p => ({ ...p, [key]: true }))
     setResults(p => ({ ...p, [key]: null }))
     try {
       const nameMap = new Map(db.getTableNames().map(t => [t.toLowerCase(), t]))
 
+      // In replace mode, clear the table before importing
+      if (replaceMode) {
+        const tr = await fetch(`/api/access/truncate/${key}`, { method: 'DELETE', credentials: 'include' })
+        const td = await tr.json()
+        if (!tr.ok) throw new Error(`Clear failed: ${td.error}`)
+        setResults(p => ({ ...p, [key]: { clearing: true, cleared: td.cleared } }))
+      }
+
       if (cfg.chunked) {
         // Process one source table at a time to keep browser memory manageable
         const CHUNK = 10000
         let totalImported = 0
-        const totalRows = tableInfo.find(t => t.key === key)?.rows ?? 0
         for (const mdbName of cfg.mdbNames) {
           const real = nameMap.get(mdbName.toLowerCase())
           if (!real) continue
@@ -244,9 +257,13 @@ function AccessDBPanel() {
   }
 
   async function importAll() {
-    // Skip chunked (large history) tables — import those manually
-    for (const t of tableInfo.filter(t => t.found && !MDB_TABLE_MAP[t.key]?.chunked)) {
-      await importTable(t.key)
+    const targets = tableInfo.filter(t => t.found && !MDB_TABLE_MAP[t.key]?.chunked)
+    if (replaceMode) {
+      const names = targets.map(t => MDB_TABLE_MAP[t.key]?.label || t.key).join(', ')
+      if (!confirm(`REPLACE MODE: This will DELETE ALL existing data in:\n\n${names}\n\n…then re-import from the Access file.\n\nThis cannot be undone. Continue?`)) return
+    }
+    for (const t of targets) {
+      await importTable(t.key, true)  // skipConfirm — already confirmed above
     }
   }
 
@@ -281,13 +298,25 @@ function AccessDBPanel() {
       {/* Table grid */}
       {tableInfo.length > 0 && (
         <div className="section-card" style={{ padding: 0 }}>
-          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12 }}>
+          <div style={{ padding: '10px 14px', borderBottom: '1px solid var(--border)', display: 'flex', alignItems: 'center', gap: 12, flexWrap: 'wrap' }}>
             <span style={{ fontSize: 13, color: '#16a34a', fontWeight: 600 }}>
               ✓ {fileName} — {tableInfo.filter(t => t.found).length} importable tables found
             </span>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13,
+              color: replaceMode ? '#dc2626' : 'var(--text-muted)',
+              fontWeight: replaceMode ? 700 : 400,
+              padding: '3px 8px',
+              background: replaceMode ? '#fee2e2' : 'transparent',
+              borderRadius: 'var(--radius-sm)',
+              border: replaceMode ? '1px solid #fca5a5' : '1px solid transparent',
+              cursor: 'pointer',
+            }}>
+              <input type="checkbox" checked={replaceMode} onChange={e => setReplaceMode(e.target.checked)} />
+              {replaceMode ? '⚠ Replace mode ON — tables will be cleared before import' : 'Replace mode (clear before import)'}
+            </label>
             <div style={{ flex: 1 }} />
-            <button className="btn btn-primary btn-sm" onClick={importAll} disabled={anyBusy}>
-              {anyBusy ? 'Importing…' : '↑ Import All'}
+            <button className={`btn btn-sm ${replaceMode ? 'btn-danger' : 'btn-primary'}`} onClick={importAll} disabled={anyBusy}>
+              {anyBusy ? 'Importing…' : replaceMode ? '⚠ Replace All' : '↑ Import All'}
             </button>
           </div>
 
@@ -317,22 +346,27 @@ function AccessDBPanel() {
                       {t.found ? t.rows.toLocaleString() : '—'}
                     </td>
                     <td>
-                      <button className="btn btn-primary btn-sm" disabled={!t.found || isBusy}
+                      <button className={`btn btn-sm ${replaceMode ? 'btn-danger' : 'btn-primary'}`}
+                        disabled={!t.found || isBusy}
                         onClick={() => importTable(t.key)}>
-                        {isBusy ? 'Importing…' : '↑ Import'}
+                        {isBusy ? 'Importing…' : replaceMode ? '⚠ Replace' : '↑ Import'}
                       </button>
                     </td>
                     <td>
                       {res && (
                         res.error
                           ? <span style={{ color: 'var(--error)', fontSize: 12 }}>✕ {res.error}</span>
-                          : res.progress
-                            ? <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-                                {res.imported?.toLocaleString()} rows…
+                          : res.clearing
+                            ? <span style={{ fontSize: 12, color: '#dc2626' }}>
+                                Cleared {res.cleared?.toLocaleString()} rows…
                               </span>
-                            : <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
-                                ✓ {res.imported?.toLocaleString()} rows
-                              </span>
+                            : res.progress
+                              ? <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                                  {res.imported?.toLocaleString()} rows…
+                                </span>
+                              : <span style={{ color: '#16a34a', fontSize: 13, fontWeight: 600 }}>
+                                  ✓ {res.imported?.toLocaleString()} rows
+                                </span>
                       )}
                     </td>
                   </tr>
