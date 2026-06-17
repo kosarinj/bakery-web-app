@@ -258,11 +258,19 @@ export async function importRecipes(tbl, q) {
     await q(`DELETE FROM recipes WHERE product = ANY($1::text[])`, [products])
   }
 
-  const cols = ['product','ingredient','sequence','rectext','teaspoons','tablespoons','cups','pounds','space','rec_group','qty']
+  const cols  = ['product','ingredient','sequence','rectext','teaspoons','tablespoons','cups','pounds','space','rec_group','qty']
+  const casts = { sequence:'::int', teaspoons:'::numeric', tablespoons:'::numeric', cups:'::numeric', pounds:'::numeric', space:'::bool', rec_group:'::bool', qty:'::numeric' }
   return chunkInsert(rows, 200, async chunk => {
     const vals = chunk.flatMap(r => cols.map(c => r[c]))
-    const ph   = chunk.map((_, i) => '(' + cols.map((_, j) => `$${i*cols.length+j+1}`).join(',') + ')').join(',')
-    await q(`INSERT INTO recipes(${cols.join(',')}) VALUES ${ph} ON CONFLICT DO NOTHING`, vals)
+    const ph   = chunk.map((_, i) => '(' + cols.map((c, j) => `$${i*cols.length+j+1}${casts[c]??''}`).join(',') + ')').join(',')
+    await q(`
+      INSERT INTO recipes(${cols.join(',')})
+      SELECT ${cols.map(c => `v.${c}`).join(',')}
+      FROM (VALUES ${ph}) AS v(${cols.join(',')})
+      WHERE EXISTS (SELECT 1 FROM products p WHERE p.prod_name = v.product)
+        AND (v.ingredient IS NULL OR EXISTS (SELECT 1 FROM ingredients i WHERE i.name = v.ingredient))
+      ON CONFLICT DO NOTHING
+    `, vals)
   })
 }
 
