@@ -2193,9 +2193,10 @@ app.delete('/api/access/truncate/:table', requireAuth, async (req, res) => {
   const dbTable = TRUNCATE_TABLE_MAP[req.params.table]
   if (!dbTable) return res.status(400).json({ error: `Unknown table: ${req.params.table}` })
   try {
-    const { rowCount } = await query(`DELETE FROM ${dbTable}`)
-    await logActivity(req, 'access_truncate', `Cleared ${rowCount} rows from ${dbTable} before replace import`)
-    res.json({ cleared: rowCount, table: dbTable })
+    // CASCADE handles FK dependencies (e.g. daily_orders → accounts)
+    await query(`TRUNCATE ${dbTable} CASCADE`)
+    await logActivity(req, 'access_truncate', `Truncated ${dbTable} (CASCADE) before replace import`)
+    res.json({ cleared: '(all)', table: dbTable })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
