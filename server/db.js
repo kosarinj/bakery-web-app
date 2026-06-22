@@ -92,6 +92,19 @@ async function initDB() {
     console.log('Applied: daily_inventory table')
   }
 
+  // special_ords on daily_orders was wrongly defined BOOLEAN (legacy Access flag), but the app
+  // uses it as a numeric count of special-order units (spec-order sync adds/subtracts unit deltas,
+  // and the copy/repeat query subtracts it from total units). Convert to NUMERIC if still boolean.
+  const { rows: soCheck } = await pool.query(
+    `SELECT data_type FROM information_schema.columns WHERE table_name='daily_orders' AND column_name='special_ords' LIMIT 1`
+  )
+  if (soCheck.length && soCheck[0].data_type === 'boolean') {
+    await pool.query(`ALTER TABLE daily_orders ALTER COLUMN special_ords DROP DEFAULT`)
+    await pool.query(`ALTER TABLE daily_orders ALTER COLUMN special_ords TYPE NUMERIC(10,2) USING (CASE WHEN special_ords THEN 1 ELSE 0 END)`)
+    await pool.query(`ALTER TABLE daily_orders ALTER COLUMN special_ords SET DEFAULT 0`)
+    console.log('Applied: daily_orders.special_ords boolean -> numeric')
+  }
+
   // Indexes for daily_orders — critical once the table has millions of historical rows
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_ordr_dt  ON daily_orders(ordr_dt)`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_account  ON daily_orders(account)`)

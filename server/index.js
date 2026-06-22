@@ -389,7 +389,7 @@ app.post('/api/orders', requireAuth, async (req, res) => {
     const { rows } = await query(
       `INSERT INTO daily_orders(prod_name,account,units,wprice,rprice,ordr_dt,del_date,special_ords,notes,last_update)
        VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *`,
-      [prod_name, account, units||0, wprice||0, rprice||0, ordr_dt||new Date().toISOString().slice(0,10), del_date||null, special_ords||false, notes]
+      [prod_name, account, units||0, wprice||0, rprice||0, ordr_dt||new Date().toISOString().slice(0,10), del_date||null, special_ords||0, notes]
     )
     res.json(rows[0])
   } catch (e) {
@@ -2064,7 +2064,7 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
                parseAccessDate(col(row,'ordr_dt')), pname,
                num(row,'units'), num(row,'wprice'), num(row,'rprice'),
                parseAccessDate(col(row,'del_date')),
-               bool(row,'special_ords'), num(row,'postbake_adj'),
+               (bool(row,'special_ords') ? 1 : 0), num(row,'postbake_adj'),
                parseAccessDate(col(row,'last_update')) || new Date().toISOString().slice(0,10)]
             )
             break

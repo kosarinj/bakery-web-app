@@ -82,7 +82,7 @@ CREATE TABLE IF NOT EXISTS daily_orders (
   rprice NUMERIC(10,4) DEFAULT 0,
   ordr_dt DATE DEFAULT CURRENT_DATE,
   del_date DATE,
-  special_ords BOOLEAN DEFAULT FALSE,
+  special_ords NUMERIC(10,2) DEFAULT 0,  -- count of special-order units within this day's order
   postbake_adj NUMERIC(10,2) DEFAULT 0,
   notes TEXT,
   last_update TIMESTAMPTZ DEFAULT NOW()
