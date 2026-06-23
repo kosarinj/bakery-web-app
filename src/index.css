@@ -52,8 +52,8 @@ body {
 /* ── App Shell ─────────────────────────────────────── */
 
 .app-header {
-  position: fixed;
-  top: 0; left: 0; right: 0;
+  position: sticky;
+  top: 0;
   height: var(--header-height);
   background: var(--header-bg, var(--nav-bg));
   display: flex;
@@ -110,21 +110,18 @@ body {
 :root { --topnav-height: 42px; }
 
 .top-nav {
-  position: fixed;
+  position: sticky;
   top: var(--header-height);
-  left: 0; right: 0;
-  height: var(--topnav-height);
+  min-height: var(--topnav-height);
   background: var(--nav-gradient, var(--nav-bg));
   display: flex;
   align-items: center;
-  padding: 0 12px;
+  flex-wrap: wrap;
+  padding: 4px 12px;
   gap: 2px;
   z-index: 90;
   border-bottom: 1px solid rgba(255,255,255,0.06);
-  overflow-x: auto;
-  scrollbar-width: none;
 }
-.top-nav::-webkit-scrollbar { display: none; }
 
 .top-nav a {
   display: flex;
@@ -153,7 +150,6 @@ body {
 /* ── Main Content ──────────────────────────────────── */
 
 .app-main-top {
-  margin-top: calc(var(--header-height) + var(--topnav-height));
   padding: 24px;
   min-height: calc(100vh - var(--header-height) - var(--topnav-height));
   overflow: auto;
