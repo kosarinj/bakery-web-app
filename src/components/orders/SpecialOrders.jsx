@@ -121,6 +121,7 @@ export default function SpecialOrders() {
   const [adding, setAdding]     = useState(false)
   const [dates, setDates]       = useState([])
   const [showCal, setShowCal]   = useState(false)
+  const [bakeryName, setBakeryName] = useState('')
 
   // Copy/repeat state
   const [copyFrom, setCopyFrom]       = useState('')
@@ -137,6 +138,7 @@ export default function SpecialOrders() {
         const prev = new Date(d + 'T00:00:00'); prev.setDate(prev.getDate() - 7)
         setCopyFrom(prev.toISOString().slice(0, 10))
         setCopyTo(d)
+        setBakeryName(s.bakery_name || '')
       }).catch(() => setDate(new Date().toISOString().slice(0, 10)))
 
     Promise.all([
@@ -209,6 +211,78 @@ export default function SpecialOrders() {
     finally { setCopying(false) }
   }
 
+  // Print Special Order sheets — replicates the original VB6 "custreport" (spcrpt.Dsr):
+  // one sheet per Customer + Location, grouped, with Qty / Product / Price / Notes / Subtotal and a Total.
+  function printSheets() {
+    const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+    const money = n => '$' + (Number(n) || 0).toFixed(2)
+    // Same data rule as the VB report: only lines with units > 0, honoring the location filter.
+    const items = orders.filter(o => (parseFloat(o.units) || 0) > 0 && (!copyLocation || (o.location || '') === copyLocation))
+    if (items.length === 0) { setError('No special orders with quantities to print for this date.'); return }
+
+    // Group by Customer (account) + Location — each group prints on its own sheet.
+    const groups = []; const map = new Map()
+    items.forEach(o => {
+      const key = `${o.account || ''}|||${o.location || ''}`
+      let g = map.get(key)
+      if (!g) { g = { account: o.account || '', cust_name: o.cust_name || '', location: o.location || '', rows: [] }; map.set(key, g); groups.push(g) }
+      g.rows.push(o)
+    })
+    const [y, m, d] = date.split('-')
+    const dateStr = `${m}/${d}/${y}`
+    const title = (bakeryName ? `${bakeryName}: ` : '') + 'Special Order'
+
+    const sheets = groups.map(g => {
+      const total = g.rows.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
+      const rows = g.rows.map(o => {
+        const u = parseFloat(o.units) || 0, p = parseFloat(o.price) || 0
+        return `<tr><td class="qty">${u}</td><td>${esc(o.prod_name)}</td><td class="num">${p > 0 ? money(p) : ''}</td><td class="notes">${esc(o.notes)}</td><td class="num">${money(u * p)}</td></tr>`
+      }).join('')
+      return `<div class="sheet">
+        <h1>${esc(title)}</h1>
+        <div class="meta"><span class="lbl">Order Date:</span> ${dateStr}</div>
+        <div class="meta"><span class="lbl">Customer:</span> ${esc(g.account)}</div>
+        ${g.cust_name ? `<div class="meta"><span class="lbl">Name:</span> ${esc(g.cust_name)}</div>` : ''}
+        <div class="meta"><span class="lbl">Location:</span> ${esc(g.location)}</div>
+        <table>
+          <thead><tr><th class="qty">Qty</th><th>Product Name</th><th class="num">Price</th><th class="notes">Notes</th><th class="num">Subtotal</th></tr></thead>
+          <tbody>${rows}</tbody>
+          <tfoot><tr><td colspan="4" class="tot-lbl">Total:</td><td class="num">${money(total)}</td></tr></tfoot>
+        </table>
+      </div>`
+    }).join('')
+
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>Special Orders ${dateStr}</title><style>
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0}
+      .sheet{padding:.5in;page-break-after:always}
+      .sheet:last-child{page-break-after:auto}
+      h1{font-family:"Book Antiqua","Palatino Linotype",Georgia,serif;font-size:24px;font-weight:700;margin:0 0 14px}
+      .meta{font-size:13px;margin:2px 0}
+      .meta .lbl{display:inline-block;width:95px;font-weight:700}
+      table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
+      th{text-align:left;border-bottom:2px solid #000;padding:5px 6px;font-style:italic;color:#004000}
+      td{padding:4px 6px;border-bottom:1px solid #ccc;vertical-align:top}
+      .qty{width:55px}
+      .num{text-align:right;white-space:nowrap}
+      .notes{color:#333}
+      tfoot td{border-top:2px solid #000;border-bottom:none;font-weight:700;padding-top:7px;font-size:14px}
+      .tot-lbl{text-align:right}
+      @page{margin:.5in}
+    </style></head><body>${sheets}</body></html>`
+
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open(); doc.write(html); doc.close()
+    iframe.contentWindow.focus()
+    setTimeout(() => {
+      iframe.contentWindow.print()
+      setTimeout(() => document.body.removeChild(iframe), 1500)
+    }, 300)
+  }
+
   // Distinct product types for the Add-row type filter
   const productTypes = [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
 
@@ -229,6 +303,7 @@ export default function SpecialOrders() {
         )}
         <span className="toolbar-info">{filtered.length}{copyLocation ? ` of ${orders.length}` : ''} orders · {totalUnits} units · ${totalRev.toFixed(2)}</span>
         <div className="toolbar-spacer" />
+        <button className="btn btn-secondary btn-sm" onClick={printSheets} title="Print special order sheets (one per customer/location)">🖨 Print Sheets</button>
         {!adding && <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add Special Order</button>}
       </div>
 
