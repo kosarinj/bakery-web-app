@@ -340,39 +340,23 @@ export default function SpecialOrders() {
                       </td>
                       <td>
                         {productTypes.length > 0 && (
-                          <select value={newType}
-                            onChange={e => setNewType(e.target.value)}
-                            title="Filter the product list by type (optional)"
-                            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 12, marginBottom: 4, color: 'var(--text-muted)' }}>
-                            <option value="">— all types —</option>
-                            {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                          </select>
+                          <>
+                            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Type</div>
+                            <select value={newType}
+                              onChange={e => { setNewType(e.target.value); setNewRow(p => ({ ...p, prod_name: '' })) }}
+                              title="Pick a type to narrow the product list"
+                              style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 12, marginBottom: 5 }}>
+                              <option value="">— all types —</option>
+                              {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                            </select>
+                            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Product</div>
+                          </>
                         )}
                         <select value={newRow.prod_name} onChange={e => setNewRow(p => ({ ...p, prod_name: e.target.value }))}
                           style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
                           <option value="">— product —</option>
-                          {productTypes.length > 0 ? (
-                            <>
-                              {productTypes
-                                .filter(t => !newType || t === newType)
-                                .map(t => (
-                                  <optgroup key={t} label={t}>
-                                    {products.filter(p => p.prod_type === t).map(p => (
-                                      <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>
-                                    ))}
-                                  </optgroup>
-                                ))}
-                              {!newType && products.some(p => !p.prod_type) && (
-                                <optgroup label="Other">
-                                  {products.filter(p => !p.prod_type).map(p => (
-                                    <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>
-                                  ))}
-                                </optgroup>
-                              )}
-                            </>
-                          ) : (
-                            products.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
-                          )}
+                          {(newType ? products.filter(p => p.prod_type === newType) : products)
+                            .map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
                         </select>
                       </td>
                       <td>
