@@ -117,6 +117,7 @@ export default function SpecialOrders() {
   const [loading, setLoading]   = useState(true)
   const [error, setError]       = useState('')
   const [newRow, setNewRow]     = useState(EMPTY)
+  const [newType, setNewType]   = useState('')
   const [adding, setAdding]     = useState(false)
   const [dates, setDates]       = useState([])
   const [showCal, setShowCal]   = useState(false)
@@ -171,7 +172,7 @@ export default function SpecialOrders() {
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
       setOrders(prev => [...prev, d])
-      setNewRow(EMPTY); setAdding(false)
+      setNewRow(EMPTY); setNewType(''); setAdding(false)
     } catch (e) { setError(e.message) }
   }
 
@@ -207,6 +208,9 @@ export default function SpecialOrders() {
     } catch (e) { setError(e.message) }
     finally { setCopying(false) }
   }
+
+  // Distinct product types for the Add-row type filter
+  const productTypes = [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
 
   // The Location dropdown filters the visible table AND scopes the repeat (below).
   const filtered = copyLocation ? orders.filter(o => (o.location || '') === copyLocation) : orders
@@ -335,10 +339,20 @@ export default function SpecialOrders() {
                         </datalist>
                       </td>
                       <td>
+                        {productTypes.length > 0 && (
+                          <select value={newType}
+                            onChange={e => { setNewType(e.target.value); setNewRow(p => ({ ...p, prod_name: '' })) }}
+                            style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 12, marginBottom: 4, color: 'var(--text-muted)' }}>
+                            <option value="">— all types —</option>
+                            {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+                          </select>
+                        )}
                         <select value={newRow.prod_name} onChange={e => setNewRow(p => ({ ...p, prod_name: e.target.value }))}
                           style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
                           <option value="">— product —</option>
-                          {products.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+                          {products
+                            .filter(p => !newType || p.prod_type === newType)
+                            .map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
                         </select>
                       </td>
                       <td>
@@ -361,12 +375,12 @@ export default function SpecialOrders() {
                       <td>
                         <input type="text" placeholder="Notes" value={newRow.notes}
                           onChange={e => setNewRow(p => ({ ...p, notes: e.target.value }))}
-                          onKeyDown={e => { if (e.key === 'Enter') addOrder(); if (e.key === 'Escape') { setAdding(false); setNewRow(EMPTY) } }}
+                          onKeyDown={e => { if (e.key === 'Enter') addOrder(); if (e.key === 'Escape') { setAdding(false); setNewRow(EMPTY); setNewType('') } }}
                           style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
                       </td>
                       <td style={{ whiteSpace: 'nowrap' }}>
                         <button className="btn btn-primary btn-sm" style={{ marginRight: 4 }} onClick={addOrder}>Add</button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(false); setNewRow(EMPTY) }}>✕</button>
+                        <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(false); setNewRow(EMPTY); setNewType('') }}>✕</button>
                       </td>
                     </tr>
                   )}
