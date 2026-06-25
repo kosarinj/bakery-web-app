@@ -71,6 +71,9 @@ async function initDB() {
   // is_extra flag on products — marks products that belong to the "extras" category
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_extra BOOLEAN DEFAULT FALSE`)
 
+  // checked flag on spec_orders — per-order checkbox (defaults checked); replaces destructive delete
+  await pool.query(`ALTER TABLE spec_orders ADD COLUMN IF NOT EXISTS checked BOOLEAN DEFAULT TRUE`)
+
   // Daily inventory — end-of-day location scanning (Left/Return counts per delivery stop)
   const { rows: diCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='daily_inventory' LIMIT 1`)
   if (!diCheck.length) {

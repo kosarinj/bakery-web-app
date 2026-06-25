@@ -841,7 +841,7 @@ app.post('/api/spec-orders', requireAuth, async (req, res) => {
 })
 
 app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
-  const fields = ['account','cust_name','location','ordr_dt','del_date','prod_name','units','price','phone','notes']
+  const fields = ['account','cust_name','location','ordr_dt','del_date','prod_name','units','price','phone','notes','checked']
   const updates = ['last_update=NOW()'], vals = []
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   vals.push(req.params.id)

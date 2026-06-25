@@ -169,6 +169,7 @@ CREATE TABLE IF NOT EXISTS spec_orders (
   price       NUMERIC(10,4) DEFAULT 0,
   phone       TEXT,
   notes       TEXT,
+  checked     BOOLEAN DEFAULT TRUE,
   created_at  TIMESTAMPTZ DEFAULT NOW(),
   last_update TIMESTAMPTZ DEFAULT NOW()
 );

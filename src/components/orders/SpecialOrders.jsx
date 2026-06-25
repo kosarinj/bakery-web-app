@@ -284,12 +284,12 @@ export default function SpecialOrders() {
                     <th style={{ minWidth: 100 }}>Del Date</th>
                     <th style={{ minWidth: 120 }}>Phone</th>
                     <th style={{ minWidth: 200 }}>Notes</th>
-                    <th style={{ width: 40 }}></th>
+                    <th style={{ width: 40, textAlign: 'center' }} title="Checked">✓</th>
                   </tr>
                 </thead>
                 <tbody>
                   {filtered.map(o => (
-                    <tr key={o.id}>
+                    <tr key={o.id} style={o.checked === false ? { opacity: 0.45 } : undefined}>
                       <td style={{ fontWeight: 500 }}>{o.account}</td>
                       <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.location||''} onSave={v=>save(o.id,'location',v)} type="text" align="left" /></td>
@@ -304,7 +304,10 @@ export default function SpecialOrders() {
                       <td><EditableCell value={o.phone||''} onSave={v=>save(o.id,'phone',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.notes||''} onSave={v=>save(o.id,'notes',v)} type="text" align="left" /></td>
                       <td style={{ textAlign: 'center' }}>
-                        <button className="btn btn-danger btn-sm" style={{ padding: '2px 6px', fontSize: 11 }} onClick={() => del(o.id)}>✕</button>
+                        <input type="checkbox" checked={o.checked !== false}
+                          onChange={e => save(o.id, 'checked', e.target.checked)}
+                          title="Uncheck to mark this order off — it stays in the list"
+                          style={{ width: 16, height: 16, cursor: 'pointer' }} />
                       </td>
                     </tr>
                   ))}
