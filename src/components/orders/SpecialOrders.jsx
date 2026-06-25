@@ -208,8 +208,10 @@ export default function SpecialOrders() {
     finally { setCopying(false) }
   }
 
-  const totalUnits = orders.reduce((s, o) => s + (parseFloat(o.units) || 0), 0)
-  const totalRev   = orders.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
+  // The Location dropdown filters the visible table AND scopes the repeat (below).
+  const filtered = copyLocation ? orders.filter(o => (o.location || '') === copyLocation) : orders
+  const totalUnits = filtered.reduce((s, o) => s + (parseFloat(o.units) || 0), 0)
+  const totalRev   = filtered.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
 
   return (
     <div>
@@ -221,7 +223,7 @@ export default function SpecialOrders() {
             {showCal ? '▲ Hide Calendar' : '▼ Calendar'}
           </button>
         )}
-        <span className="toolbar-info">{orders.length} orders · {totalUnits} units · ${totalRev.toFixed(2)}</span>
+        <span className="toolbar-info">{filtered.length}{copyLocation ? ` of ${orders.length}` : ''} orders · {totalUnits} units · ${totalRev.toFixed(2)}</span>
         <div className="toolbar-spacer" />
         {!adding && <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add Special Order</button>}
       </div>
@@ -232,7 +234,7 @@ export default function SpecialOrders() {
         <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>→</span>
         <label>To: <input type="date" value={copyTo} onChange={e => setCopyTo(e.target.value)} /></label>
         {locations.length > 0 && (
-          <label>Location:
+          <label>Location (filters list + repeat):
             <select value={copyLocation} onChange={e => setCopyLocation(e.target.value)}
               style={{ marginLeft: 4, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13, background: copyLocation ? 'var(--primary-light)' : 'var(--surface)' }}>
               <option value="">All locations</option>
@@ -286,7 +288,7 @@ export default function SpecialOrders() {
                   </tr>
                 </thead>
                 <tbody>
-                  {orders.map(o => (
+                  {filtered.map(o => (
                     <tr key={o.id}>
                       <td style={{ fontWeight: 500 }}>{o.account}</td>
                       <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
@@ -366,14 +368,16 @@ export default function SpecialOrders() {
                     </tr>
                   )}
 
-                  {orders.length === 0 && !adding && (
+                  {filtered.length === 0 && !adding && (
                     <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
-                      No special orders for {date}.
+                      {copyLocation
+                        ? <>No special orders for {date} at location <strong>{copyLocation}</strong>.</>
+                        : <>No special orders for {date}.</>}
                       {dates.length > 0 && !showCal && <span> Click <strong>Calendar</strong> to browse dates with orders.</span>}
                     </td></tr>
                   )}
 
-                  {orders.length > 0 && (
+                  {filtered.length > 0 && (
                     <tr className="totals-row">
                       <td colSpan={4}>Total</td>
                       <td className="total-cell">{totalUnits}</td>
