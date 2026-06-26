@@ -1608,6 +1608,8 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
         const recipes = recMap[o.prod_name] || []
         multProducts.push({
           prod_name: o.prod_name, units, multiplier, batches,
+          // raw (per-batch) recipe rows incl. id so the client can scale and edit them
+          recipe: recipes,
           ingredients: scaleIngredients(recipes, batches)
         })
       }
@@ -1616,7 +1618,7 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
     const batchGroups = Object.values(groupMap).map(g => {
       const batches = g.multiplier > 0 ? Math.ceil(g.total_equiv / g.multiplier) : 1
       const recipes = recMap[g.group] || recMap[g.products[0]?.prod_name] || []
-      return { ...g, batches, ingredients: scaleIngredients(recipes, batches) }
+      return { ...g, batches, recipe: recipes, ingredients: scaleIngredients(recipes, batches) }
     })
 
     res.json({ batch_groups: batchGroups, mult_products: multProducts, date: dateVal })

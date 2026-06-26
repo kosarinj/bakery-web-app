@@ -1,5 +1,7 @@
 import { useState, useEffect } from 'react'
 
+function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
+
 function fmt(n, unit) {
   if (!n || n === 0) return ''
   const v = parseFloat(n)
@@ -8,96 +10,124 @@ function fmt(n, unit) {
   return unit ? `${s} ${unit}` : s
 }
 
-function IngredientLine({ row, scale }) {
-  const s = scale || 1
+// One ingredient row. View mode shows base × scale; edit mode shows editable per-batch base amounts.
+function IngredientRow({ row, scale, editing, onSave }) {
   if (row.space) return <tr><td colSpan={6} style={{ height: 8 }} /></tr>
   if (row.rectext && !row.ingredient) {
     return (
-      <tr>
-        <td colSpan={6} style={{ fontWeight: 600, fontStyle: 'italic', paddingTop: 8, paddingBottom: 4, color: 'var(--primary)' }}>
-          {row.rectext}
-        </td>
-      </tr>
+      <tr><td colSpan={6} style={{ fontWeight: 600, fontStyle: 'italic', paddingTop: 8, paddingBottom: 4, color: 'var(--primary)' }}>{row.rectext}</td></tr>
     )
   }
-  const tsp   = parseFloat(row.teaspoons)   * s
-  const tbsp  = parseFloat(row.tablespoons) * s
-  const cups  = parseFloat(row.cups)        * s
-  const lbs   = parseFloat(row.pounds)      * s
-  const qty   = parseFloat(row.qty)         * s
-  const cost  = (parseFloat(row.cost_cup || 0) * cups) + (parseFloat(row.cost_pound || 0) * lbs)
+  const cell = (field, unit) => {
+    const base = num(row[field])
+    if (editing) {
+      return (
+        <input
+          type="number" step="any" defaultValue={base || ''} placeholder="0"
+          onClick={e => e.stopPropagation()}
+          onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
+          onBlur={e => { const v = num(e.target.value); if (v !== base) onSave(row.id, field, v) }}
+          style={{ width: 58, textAlign: 'right', border: '1px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '2px 4px', fontSize: 12, background: 'var(--cell-edit-bg)' }}
+          title={`Base per-batch ${unit}`}
+        />
+      )
+    }
+    return fmt(base * scale, unit)
+  }
   return (
     <tr>
       <td style={{ paddingLeft: 12, fontWeight: 500 }}>{row.ingredient}</td>
-      <td style={{ textAlign: 'right', paddingRight: 8 }}>{fmt(tsp, 'tsp')}</td>
-      <td style={{ textAlign: 'right', paddingRight: 8 }}>{fmt(tbsp, 'tbsp')}</td>
-      <td style={{ textAlign: 'right', paddingRight: 8 }}>{fmt(cups, 'cups')}</td>
-      <td style={{ textAlign: 'right', paddingRight: 8 }}>{fmt(lbs, 'lbs')}{fmt(qty, row.ingr_unit || '')}</td>
-      <td style={{ textAlign: 'right', paddingRight: 8, color: 'var(--text-muted)', fontSize: 11 }}>
-        {cost > 0 ? `$${cost.toFixed(2)}` : ''}
-      </td>
+      <td style={{ textAlign: 'right', paddingRight: 8 }}>{cell('teaspoons', 'tsp')}</td>
+      <td style={{ textAlign: 'right', paddingRight: 8 }}>{cell('tablespoons', 'tbsp')}</td>
+      <td style={{ textAlign: 'right', paddingRight: 8 }}>{cell('cups', 'cups')}</td>
+      <td style={{ textAlign: 'right', paddingRight: 8 }}>{cell('pounds', 'lbs')}</td>
+      <td style={{ textAlign: 'right', paddingRight: 8 }}>{cell('qty', row.ingr_unit || '')}</td>
     </tr>
   )
 }
 
-function RecipeCard({ title, batches, units, products, ingredients, type }) {
-  const [open, setOpen] = useState(true)
-  const totalCost = ingredients.reduce((s, r) => {
-    if (!r.ingredient) return s
-    const cups = parseFloat(r.cups) || 0
-    const lbs  = parseFloat(r.pounds) || 0
-    return s + (parseFloat(r.cost_cup || 0) * cups) + (parseFloat(r.cost_pound || 0) * lbs)
-  }, 0)
+function RecipeCard({ title, type, baseBatches, units, products, recipe, onError }) {
+  const [open, setOpen]       = useState(true)
+  const [editing, setEditing] = useState(false)
+  const [batches, setBatches] = useState(baseBatches)
+  const [rows, setRows]       = useState(recipe || [])
+
+  // Re-sync when a fresh generation comes in
+  useEffect(() => { setRows(recipe || []); setBatches(baseBatches); setEditing(false) }, [recipe, baseBatches])
+
+  const scale = num(batches)
+
+  async function saveField(rowId, field, value) {
+    setRows(rs => rs.map(r => r.id === rowId ? { ...r, [field]: value } : r))
+    try {
+      const r = await fetch(`/api/recipes/${rowId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ [field]: value })
+      })
+      if (!r.ok) throw new Error((await r.json()).error || 'save failed')
+    } catch (e) { onError && onError(`Recipe save failed: ${e.message}`) }
+  }
+
+  const stop = e => e.stopPropagation()
 
   return (
     <div className="section-card" style={{ marginBottom: 10 }}>
-      <div className="card-header" style={{ cursor: 'pointer' }} onClick={() => setOpen(o => !o)}>
-        <div style={{ flex: 1 }}>
-          <span style={{ fontWeight: 700, fontSize: 14 }}>{title}</span>
-          <span className={`badge ${type === 'batch' ? 'badge-purple' : 'badge-blue'}`} style={{ marginLeft: 8 }}>
-            {type === 'batch' ? 'Batch' : 'Mult'}
-          </span>
-          <span style={{ marginLeft: 12, fontSize: 13, color: 'var(--text-muted)' }}>
-            {batches} batch{batches !== 1 ? 'es' : ''} · {Math.round(units)} units
-          </span>
-          {totalCost > 0 && (
-            <span style={{ marginLeft: 12, fontSize: 12, color: '#16a34a', fontWeight: 600 }}>
-              Est. cost: ${totalCost.toFixed(2)}
-            </span>
-          )}
-          {products && products.length > 1 && (
-            <span style={{ marginLeft: 8, fontSize: 12, color: 'var(--text-muted)' }}>
-              ({products.map(p => `${p.prod_name} ×${Math.round(p.units)}`).join(', ')})
-            </span>
-          )}
-        </div>
+      <div className="card-header" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }} onClick={() => setOpen(o => !o)}>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{open ? '▲' : '▼'}</span>
+        <span style={{ fontWeight: 700, fontSize: 14 }}>{title}</span>
+        <span className={`badge ${type === 'batch' ? 'badge-purple' : 'badge-blue'}`}>{type === 'batch' ? 'Batch' : 'Mult'}</span>
+
+        <label onClick={stop} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)' }}
+          title="Number of batches to scale the recipe by (adjust for this view)">
+          Batches:
+          <input type="number" step="any" min="0" value={batches}
+            onChange={e => setBatches(e.target.value)}
+            style={{ width: 56, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '2px 5px', fontSize: 13, fontWeight: 700, textAlign: 'right' }} />
+          {num(batches) !== num(baseBatches) && (
+            <button className="btn btn-secondary btn-sm" style={{ padding: '1px 6px', fontSize: 11 }}
+              onClick={() => setBatches(baseBatches)} title={`Reset to calculated (${baseBatches})`}>↺</button>
+          )}
+        </label>
+
+        <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{Math.round(units)} units</span>
+
+        {products && products.length > 1 && (
+          <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+            ({products.map(p => `${p.prod_name} ×${Math.round(p.units)}`).join(', ')})
+          </span>
+        )}
+
+        <span style={{ flex: 1 }} />
+        <button className={`btn btn-sm ${editing ? 'btn-primary' : 'btn-secondary'}`}
+          onClick={e => { stop(e); setEditing(v => !v) }}
+          title="Edit the base (per-batch) recipe amounts — saves to the master recipe">
+          {editing ? '✓ Done' : '✎ Edit Recipe'}
+        </button>
       </div>
 
       {open && (
         <div style={{ padding: '4px 0' }}>
-          {ingredients.length === 0 ? (
-            <div style={{ padding: '12px 16px', color: 'var(--text-muted)', fontSize: 13 }}>No recipe found.</div>
+          {editing && (
+            <div style={{ padding: '4px 12px', fontSize: 12, color: 'var(--accent)', fontWeight: 600 }}>
+              Editing base per-batch amounts — changes save to the master recipe and rescale everywhere.
+            </div>
+          )}
+          {rows.length === 0 ? (
+            <div style={{ padding: '12px 16px', color: 'var(--text-muted)', fontSize: 13 }}>No recipe found for this product.</div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>
                 <tr style={{ background: 'var(--thead-bg)' }}>
-                  {['Ingredient','Tsp','Tbsp','Cups','Lbs / Qty','Est. Cost'].map(h => (
+                  {['Ingredient', 'Tsp', 'Tbsp', 'Cups', 'Lbs', 'Qty'].map(h => (
                     <th key={h} style={{ textAlign: h === 'Ingredient' ? 'left' : 'right', padding: '6px 8px', fontWeight: 600, fontSize: 11, textTransform: 'uppercase', color: 'var(--thead-text)', paddingLeft: h === 'Ingredient' ? 12 : 8 }}>{h}</th>
                   ))}
                 </tr>
               </thead>
               <tbody>
-                {ingredients.map((ing, i) => <IngredientLine key={i} row={ing} scale={1} />)}
+                {rows.map((ing, i) => (
+                  <IngredientRow key={ing.id ?? i} row={ing} scale={scale} editing={editing} onSave={saveField} />
+                ))}
               </tbody>
-              {totalCost > 0 && (
-                <tfoot>
-                  <tr style={{ background: 'var(--totals-bg)', borderTop: '2px solid var(--border)' }}>
-                    <td colSpan={5} style={{ padding: '6px 8px', fontWeight: 600, fontSize: 12, paddingLeft: 12 }}>Total estimated ingredient cost</td>
-                    <td style={{ textAlign: 'right', paddingRight: 8, fontWeight: 700, color: '#16a34a' }}>${totalCost.toFixed(2)}</td>
-                  </tr>
-                </tfoot>
-              )}
             </table>
           )}
         </div>
@@ -177,8 +207,8 @@ export default function RecipeGenerator() {
           </div>
           {filteredBatch.map(g => (
             <RecipeCard key={g.group} title={g.group} type="batch"
-              batches={g.batches} units={g.total_equiv}
-              products={g.products} ingredients={g.ingredients} />
+              baseBatches={g.batches} units={g.total_equiv}
+              products={g.products} recipe={g.recipe} onError={setError} />
           ))}
         </div>
       )}
@@ -190,8 +220,8 @@ export default function RecipeGenerator() {
           </div>
           {filteredMult.map(p => (
             <RecipeCard key={p.prod_name} title={p.prod_name} type="mult"
-              batches={p.batches} units={p.units}
-              products={null} ingredients={p.ingredients} />
+              baseBatches={p.batches} units={p.units}
+              products={null} recipe={p.recipe} onError={setError} />
           ))}
         </div>
       )}
