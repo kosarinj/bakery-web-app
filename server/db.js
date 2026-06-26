@@ -74,6 +74,10 @@ async function initDB() {
   // checked flag on spec_orders — per-order checkbox (defaults checked); replaces destructive delete
   await pool.query(`ALTER TABLE spec_orders ADD COLUMN IF NOT EXISTS checked BOOLEAN DEFAULT TRUE`)
 
+  // Account on spec_orders is now just a mirror of Location (the UI dropped the Account field),
+  // so drop the FK to accounts(name) — account holds the location value, which may not be an account.
+  await pool.query(`ALTER TABLE spec_orders DROP CONSTRAINT IF EXISTS spec_orders_account_fkey`)
+
   // Daily inventory — end-of-day location scanning (Left/Return counts per delivery stop)
   const { rows: diCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='daily_inventory' LIMIT 1`)
   if (!diCheck.length) {

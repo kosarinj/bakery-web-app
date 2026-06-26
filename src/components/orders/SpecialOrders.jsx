@@ -166,11 +166,12 @@ export default function SpecialOrders() {
   }
 
   async function addOrder() {
-    if (!newRow.account || !newRow.prod_name) return
+    if (!newRow.location || !newRow.prod_name) return
     try {
       const r = await fetch('/api/spec-orders', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ ...newRow, ordr_dt: date })
+        // Account is the same as Location — keep the account column in sync for back-end grouping
+        body: JSON.stringify({ ...newRow, account: newRow.location, ordr_dt: date })
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
@@ -221,12 +222,12 @@ export default function SpecialOrders() {
     const items = orders.filter(o => (parseFloat(o.units) || 0) > 0 && (!copyLocation || (o.location || '') === copyLocation))
     if (items.length === 0) { setError('No special orders with quantities to print for this date.'); return }
 
-    // Group by Customer (account) + Location — each group prints on its own sheet.
+    // Group by Location — each location prints on its own sheet.
     const groups = []; const map = new Map()
     items.forEach(o => {
-      const key = `${o.account || ''}|||${o.location || ''}`
+      const key = o.location || ''
       let g = map.get(key)
-      if (!g) { g = { account: o.account || '', cust_name: o.cust_name || '', location: o.location || '', rows: [] }; map.set(key, g); groups.push(g) }
+      if (!g) { g = { cust_name: o.cust_name || '', location: o.location || '', rows: [] }; map.set(key, g); groups.push(g) }
       g.rows.push(o)
     })
     const [y, m, d] = date.split('-')
@@ -242,8 +243,7 @@ export default function SpecialOrders() {
       return `<div class="sheet">
         <h1>${esc(title)}</h1>
         <div class="meta"><span class="lbl">Order Date:</span> ${dateStr}</div>
-        <div class="meta"><span class="lbl">Customer:</span> ${esc(g.account)}</div>
-        ${g.cust_name ? `<div class="meta"><span class="lbl">Name:</span> ${esc(g.cust_name)}</div>` : ''}
+        ${g.cust_name ? `<div class="meta"><span class="lbl">Customer:</span> ${esc(g.cust_name)}</div>` : ''}
         <div class="meta loc"><span class="lbl">Location:</span> <span class="locval">${esc(g.location)}</span></div>
         <table>
           <thead><tr><th class="qty">Qty</th><th>Product Name</th><th class="num">Price</th><th class="notes">Notes</th><th class="num">Subtotal</th></tr></thead>
@@ -364,9 +364,8 @@ export default function SpecialOrders() {
               <table className="data-grid" style={{ minWidth: 1050 }}>
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 140 }}>Account</th>
+                    <th style={{ minWidth: 130 }}>Location</th>
                     <th style={{ minWidth: 120 }}>Customer</th>
-                    <th style={{ minWidth: 120 }}>Location</th>
                     <th style={{ minWidth: 160 }}>Product</th>
                     <th style={{ minWidth: 70, textAlign: 'right' }}>Units</th>
                     <th style={{ minWidth: 80, textAlign: 'right' }}>Price</th>
@@ -379,9 +378,8 @@ export default function SpecialOrders() {
                 <tbody>
                   {filtered.map(o => (
                     <tr key={o.id} style={o.checked === false ? { opacity: 0.45 } : undefined}>
-                      <td style={{ fontWeight: 500 }}>{o.account}</td>
-                      <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.location||''} onSave={v=>save(o.id,'location',v)} type="text" align="left" /></td>
+                      <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
                       <td style={{ fontWeight: 500 }}>{o.prod_name}</td>
                       <td><EditableCell value={parseFloat(o.units)||0} onSave={v=>save(o.id,'units',v)} type="number" align="right" /></td>
                       <td><EditableCell value={parseFloat(o.price)||0} onSave={v=>save(o.id,'price',v)} type="number" align="right" formatter={v => v > 0 ? `$${parseFloat(v).toFixed(2)}` : ''} /></td>
@@ -404,24 +402,17 @@ export default function SpecialOrders() {
                   {adding && (
                     <tr style={{ background: 'var(--cell-edit-bg)' }}>
                       <td>
-                        <select autoFocus value={newRow.account} onChange={e => setNewRow(p => ({ ...p, account: e.target.value }))}
-                          style={{ width: '100%', border: '2px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
-                          <option value="">— account —</option>
-                          {accounts.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
-                        </select>
+                        <input type="text" autoFocus placeholder="Location" value={newRow.location} list="spec-locations"
+                          onChange={e => setNewRow(p => ({ ...p, location: e.target.value }))}
+                          style={{ width: '100%', border: '2px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
+                        <datalist id="spec-locations">
+                          {locations.map(l => <option key={l} value={l} />)}
+                        </datalist>
                       </td>
                       <td>
                         <input type="text" placeholder="Customer name" value={newRow.cust_name}
                           onChange={e => setNewRow(p => ({ ...p, cust_name: e.target.value }))}
                           style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                      </td>
-                      <td>
-                        <input type="text" placeholder="Location" value={newRow.location} list="spec-locations"
-                          onChange={e => setNewRow(p => ({ ...p, location: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                        <datalist id="spec-locations">
-                          {locations.map(l => <option key={l} value={l} />)}
-                        </datalist>
                       </td>
                       <td>
                         {productTypes.length > 0 && (
@@ -475,7 +466,7 @@ export default function SpecialOrders() {
                   )}
 
                   {filtered.length === 0 && !adding && (
-                    <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                       {copyLocation
                         ? <>No special orders for {date} at location <strong>{copyLocation}</strong>.</>
                         : <>No special orders for {date}.</>}
@@ -485,7 +476,7 @@ export default function SpecialOrders() {
 
                   {filtered.length > 0 && (
                     <tr className="totals-row">
-                      <td colSpan={4}>Total</td>
+                      <td colSpan={3}>Total</td>
                       <td className="total-cell">{totalUnits}</td>
                       <td className="total-cell">${totalRev.toFixed(2)}</td>
                       <td colSpan={4}></td>
