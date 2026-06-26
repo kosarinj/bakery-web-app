@@ -43,7 +43,7 @@ function IngredientRow({ row, scale, editing, onSave }) {
   )
 }
 
-function RecipeCard({ kind, item, onBatches, onField }) {
+function RecipeCard({ kind, item, onBatches, onField, onPrint }) {
   const [open, setOpen]       = useState(true)
   const [editing, setEditing] = useState(false)
   const title = kind === 'batch' ? item.group : item.prod_name
@@ -80,6 +80,8 @@ function RecipeCard({ kind, item, onBatches, onField }) {
         )}
 
         <span style={{ flex: 1 }} />
+        <button className="btn btn-secondary btn-sm" onClick={e => { stop(e); onPrint && onPrint() }}
+          title="Print just this recipe">🖨</button>
         <button className={`btn btn-sm ${editing ? 'btn-primary' : 'btn-secondary'}`}
           onClick={e => { stop(e); setEditing(v => !v) }}
           title="Edit the base (per-batch) recipe amounts — saves to the master recipe">
@@ -177,16 +179,28 @@ export default function RecipeGenerator() {
     } catch (e) { setError(`Recipe save failed: ${e.message}`) }
   }
 
-  // Print the generated recipes — replicates the VB6 "bakerec" report ("<Bakery> Recipe"):
-  // one recipe per product/group, with scaled ingredient lines. Uses current batch counts & edits.
+  // Normalize a batch group / mult product into a printable card descriptor
+  function buildCard(kind, item) {
+    return kind === 'batch'
+      ? { kind: 'batch', title: item.group, units: item.total_equiv, batches: num(item.batches), recipe: item.recipe, products: item.products }
+      : { kind: 'mult', title: item.prod_name, units: item.units, batches: num(item.batches), recipe: item.recipe, products: null }
+  }
+
+  // Print all visible recipes (respects search + Batch/Mult toggles)
   function printRecipes() {
-    if (!data) return
-    const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
     const cards = [
-      ...(showBatch ? filteredBatch.map(g => ({ kind: 'batch', title: g.group, units: g.total_equiv, batches: num(g.batches), recipe: g.recipe, products: g.products })) : []),
-      ...(showMult ? filteredMult.map(p => ({ kind: 'mult', title: p.prod_name, units: p.units, batches: num(p.batches), recipe: p.recipe, products: null })) : []),
+      ...(showBatch ? filteredBatch.map(g => buildCard('batch', g)) : []),
+      ...(showMult ? filteredMult.map(p => buildCard('mult', p)) : []),
     ]
     if (cards.length === 0) { setError('Nothing to print — generate recipes first.'); return }
+    doPrint(cards)
+  }
+
+  // Print recipe sheet(s) — replicates the VB6 "bakerec" report ("<Bakery> Recipe"):
+  // one recipe per product/group, with scaled ingredient lines. Uses current batch counts & edits.
+  function doPrint(cards) {
+    if (!cards || cards.length === 0) return
+    const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
 
     const line = (row, scale) => {
       if (row.space) return '<div class="sp"></div>'
@@ -287,7 +301,8 @@ export default function RecipeGenerator() {
           {filteredBatch.map(g => (
             <RecipeCard key={g.group} kind="batch" item={g}
               onBatches={v => setBatches('batch', g.group, v)}
-              onField={(rowId, field, value) => saveField('batch', g.group, rowId, field, value)} />
+              onField={(rowId, field, value) => saveField('batch', g.group, rowId, field, value)}
+              onPrint={() => doPrint([buildCard('batch', g)])} />
           ))}
         </div>
       )}
@@ -300,7 +315,8 @@ export default function RecipeGenerator() {
           {filteredMult.map(p => (
             <RecipeCard key={p.prod_name} kind="mult" item={p}
               onBatches={v => setBatches('mult', p.prod_name, v)}
-              onField={(rowId, field, value) => saveField('mult', p.prod_name, rowId, field, value)} />
+              onField={(rowId, field, value) => saveField('mult', p.prod_name, rowId, field, value)}
+              onPrint={() => doPrint([buildCard('mult', p)])} />
           ))}
         </div>
       )}
