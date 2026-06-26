@@ -109,6 +109,7 @@ export default function OrdersGrid() {
   const [copyMsg, setCopyMsg] = useState('')
   const [showRepeatAccounts, setShowRepeatAccounts] = useState(false)
   const [repeatAccounts, setRepeatAccounts] = useState(null) // null = all
+  const [clearAccount, setClearAccount] = useState('')
 
   const orderMapRef = useRef({})
 
@@ -193,6 +194,26 @@ export default function OrdersGrid() {
       }
     } catch (e) { setError(`Save failed: ${e.message}`) }
   }, [])
+
+  async function clearAccountOrders() {
+    if (!clearAccount || !date) return
+    if (!confirm(`Delete ALL orders for "${clearAccount}" on ${date}?\n\nThis removes every product line for that account on this day and cannot be undone.`)) return
+    try {
+      const r = await fetch('/api/orders/delete-account', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ ordr_dt: date, account: clearAccount })
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error)
+      // Drop that account's lines from the in-memory grid
+      const updated = { ...orderMapRef.current }
+      Object.keys(updated).forEach(k => { if (k.startsWith(`${clearAccount}|`)) delete updated[k] })
+      orderMapRef.current = updated; setOrderMap(updated)
+      setCopyMsg(`Deleted ${d.deleted} order${d.deleted !== 1 ? 's' : ''} for ${clearAccount}`)
+      setTimeout(() => setCopyMsg(''), 5000)
+      setClearAccount('')
+    } catch (e) { setError(`Clear failed: ${e.message}`) }
+  }
 
   async function saveDelDate(account, del_date) {
     setDelDateMap(prev => ({ ...prev, [account]: del_date }))
@@ -427,6 +448,18 @@ export default function OrdersGrid() {
           }}
           title="Filter grid and repeat orders to selected accounts">
           👥 {repeatAccounts ? `${repeatAccounts.size} accounts` : 'Filter Accounts'}
+        </button>
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '0 4px' }} />
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Delete every order for one account on this day">
+          <select value={clearAccount} onChange={e => setClearAccount(e.target.value)}
+            style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13, background: 'var(--surface)' }}>
+            <option value="">— clear account… —</option>
+            {accounts.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+          </select>
+        </label>
+        <button className="btn btn-danger btn-sm" onClick={clearAccountOrders} disabled={!clearAccount}
+          title="Delete all of the selected account's orders for this day">
+          🗑 Clear Account
         </button>
         {copyMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>}
       </div>

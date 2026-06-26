@@ -424,6 +424,20 @@ app.patch('/api/orders/del-date', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Delete all orders for one account on a given order date (e.g. clear a "Shipping" account's day)
+app.post('/api/orders/delete-account', requireAuth, async (req, res) => {
+  const { ordr_dt, account } = req.body
+  if (!ordr_dt || !account) return res.status(400).json({ error: 'ordr_dt and account required' })
+  try {
+    const { rowCount } = await query(
+      `DELETE FROM daily_orders WHERE ordr_dt=$1 AND account=$2`,
+      [ordr_dt, account]
+    )
+    await logActivity(req, 'delete_account_orders', `Deleted ${rowCount} orders for ${account} on ${ordr_dt}`)
+    res.json({ success: true, deleted: rowCount })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // Copy orders from one date to another (skips account+product pairs already entered on to_date)
 // Optional: accounts array limits which accounts are copied
 app.post('/api/orders/copy', requireAuth, async (req, res) => {
