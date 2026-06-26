@@ -97,7 +97,12 @@ function RecipeCard({ kind, item, onBatches, onField, onPrint }) {
             </div>
           )}
           {rows.length === 0 ? (
-            <div style={{ padding: '12px 16px', color: 'var(--text-muted)', fontSize: 13 }}>No recipe found for this product.</div>
+            <div style={{ padding: '12px 16px', color: 'var(--text-muted)', fontSize: 13 }}>
+              No recipe found.
+              {item.recipeSearched && item.recipeSearched.length > 0 && (
+                <span> Looked for a recipe under: <strong>{item.recipeSearched.join(', ')}</strong>. Add a recipe for one of these on the Recipes page (or set their Group/Type so they share the recipe).</span>
+              )}
+            </div>
           ) : (
             <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: 13 }}>
               <thead>

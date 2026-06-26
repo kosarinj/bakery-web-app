@@ -1567,11 +1567,29 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
 
     if (!orders.length) return res.json({ batch_groups: [], mult_products: [], date: dateVal })
 
-    // All recipe rows for ordered products + their group names (matched case-insensitively,
+    // For batch groups, the recipe may live under a member product that ISN'T ordered today
+    // (e.g. a base dough). Pull every product that shares a batch group with an ordered product.
+    const batchGroupNames = [...new Set(orders.filter(o => o.batch && o.prod_group).map(o => o.prod_group))]
+    const membersByGroup = {}
+    let groupMemberNames = []
+    if (batchGroupNames.length) {
+      const { rows: members } = await query(
+        `SELECT prod_name, prod_group FROM products WHERE prod_group = ANY($1)`, [batchGroupNames]
+      )
+      members.forEach(m => {
+        const g = (m.prod_group || '').trim().toLowerCase()
+        if (!membersByGroup[g]) membersByGroup[g] = []
+        membersByGroup[g].push(m.prod_name)
+        groupMemberNames.push(m.prod_name)
+      })
+    }
+
+    // All recipe rows for ordered products + group names + every group member (case-insensitive,
     // since prod_group / prod_name casing may differ from recipes.product).
     const allNamesNorm = [...new Set([
       ...orders.map(o => (o.prod_name || '').trim().toLowerCase()),
       ...orders.map(o => (o.prod_group || '').trim().toLowerCase()).filter(Boolean),
+      ...groupMemberNames.map(n => (n || '').trim().toLowerCase()),
     ])]
     const { rows: recRows } = await query(`
       SELECT r.*, i.unit AS ingr_unit
@@ -1625,9 +1643,16 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
 
     const batchGroups = Object.values(groupMap).map(g => {
       const batches = g.multiplier > 0 ? Math.ceil(g.total_equiv / g.multiplier) : 1
-      // Recipe for the group: try the group name, else any member product that has a recipe.
-      const recipes = findRecipe(g.group) || g.products.map(p => findRecipe(p.prod_name)).find(Boolean) || []
-      return { ...g, batches, recipe: recipes, ingredients: scaleIngredients(recipes, batches) }
+      // Recipe for the group: try the group name, then ANY product in that group (ordered or not),
+      // then the ordered members.
+      const members = membersByGroup[(g.group || '').trim().toLowerCase()] || []
+      const recipes = findRecipe(g.group)
+        || members.map(n => findRecipe(n)).find(Boolean)
+        || g.products.map(p => findRecipe(p.prod_name)).find(Boolean)
+        || []
+      const out = { ...g, batches, recipe: recipes, ingredients: scaleIngredients(recipes, batches) }
+      if (recipes.length === 0) out.recipeSearched = [g.group, ...members].filter(Boolean)
+      return out
     })
 
     res.json({ batch_groups: batchGroups, mult_products: multProducts, date: dateVal })
