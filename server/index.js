@@ -1567,25 +1567,33 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
 
     if (!orders.length) return res.json({ batch_groups: [], mult_products: [], date: dateVal })
 
-    // All recipe rows for ordered products + their group names
-    const allNames = [...new Set([
-      ...orders.map(o => o.prod_name),
-      ...orders.map(o => o.prod_group).filter(Boolean),
+    // All recipe rows for ordered products + their group names (matched case-insensitively,
+    // since prod_group / prod_name casing may differ from recipes.product).
+    const allNamesNorm = [...new Set([
+      ...orders.map(o => (o.prod_name || '').trim().toLowerCase()),
+      ...orders.map(o => (o.prod_group || '').trim().toLowerCase()).filter(Boolean),
     ])]
     const { rows: recRows } = await query(`
       SELECT r.*, i.unit AS ingr_unit
       FROM recipes r
       LEFT JOIN ingredients i ON i.name = r.ingredient
-      WHERE r.product = ANY($1)
+      WHERE LOWER(TRIM(r.product)) = ANY($1)
       ORDER BY r.product, r.sequence
-    `, [allNames])
+    `, [allNamesNorm])
 
-    // Build recipe map  { productName: [rows...] }
+    // Build recipe map keyed by normalized (trim + lowercase) product name, so lookups
+    // tolerate case/whitespace differences between prod_group / prod_name and recipes.product.
     const recMap = {}
     recRows.forEach(r => {
-      if (!recMap[r.product]) recMap[r.product] = []
-      recMap[r.product].push(r)
+      const key = (r.product || '').trim().toLowerCase()
+      if (!key) return
+      if (!recMap[key]) recMap[key] = []
+      recMap[key].push(r)
     })
+    const findRecipe = name => {
+      const k = (name || '').trim().toLowerCase()
+      return (k && recMap[k] && recMap[k].length) ? recMap[k] : null
+    }
 
     // Separate batch vs mult orders
     const groupMap = {}
@@ -1605,7 +1613,7 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
         groupMap[o.prod_group].products.push({ prod_name: o.prod_name, units, divisor, equiv })
       } else {
         const batches = multiplier > 0 ? Math.ceil(units / multiplier) : units
-        const recipes = recMap[o.prod_name] || []
+        const recipes = findRecipe(o.prod_name) || []
         multProducts.push({
           prod_name: o.prod_name, units, multiplier, batches,
           // raw (per-batch) recipe rows incl. id so the client can scale and edit them
@@ -1617,7 +1625,8 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
 
     const batchGroups = Object.values(groupMap).map(g => {
       const batches = g.multiplier > 0 ? Math.ceil(g.total_equiv / g.multiplier) : 1
-      const recipes = recMap[g.group] || recMap[g.products[0]?.prod_name] || []
+      // Recipe for the group: try the group name, else any member product that has a recipe.
+      const recipes = findRecipe(g.group) || g.products.map(p => findRecipe(p.prod_name)).find(Boolean) || []
       return { ...g, batches, recipe: recipes, ingredients: scaleIngredients(recipes, batches) }
     })
 
