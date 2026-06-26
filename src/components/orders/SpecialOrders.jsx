@@ -119,6 +119,14 @@ export default function SpecialOrders() {
   const [newRow, setNewRow]     = useState(EMPTY)
   const [newType, setNewType]   = useState('')
   const [adding, setAdding]     = useState(false)
+  // Bulk add: shared Location/Customer + many product lines added at once
+  const emptyLine = () => ({ prod_name: '', units: '', price: '', notes: '' })
+  const [bulkLoc, setBulkLoc]     = useState('')
+  const [bulkCust, setBulkCust]   = useState('')
+  const [bulkDel, setBulkDel]     = useState('')
+  const [bulkPhone, setBulkPhone] = useState('')
+  const [bulkLines, setBulkLines] = useState([emptyLine()])
+  const [saving, setSaving]       = useState(false)
   const [dates, setDates]       = useState([])
   const [showCal, setShowCal]   = useState(false)
   const [bakeryName, setBakeryName] = useState('')
@@ -178,6 +186,58 @@ export default function SpecialOrders() {
       setOrders(prev => [...prev, d])
       setNewRow(EMPTY); setNewType(''); setAdding(false)
     } catch (e) { setError(e.message) }
+  }
+
+  function openBulkAdd() {
+    setBulkLoc(''); setBulkCust(''); setBulkDel(''); setBulkPhone(''); setBulkLines([emptyLine(), emptyLine(), emptyLine()])
+    setError(''); setAdding(true)
+  }
+  function setLine(i, field, value) { setBulkLines(ls => ls.map((l, idx) => idx === i ? { ...l, [field]: value } : l)) }
+  function addLine() { setBulkLines(ls => [...ls, emptyLine()]) }
+  function removeLine(i) { setBulkLines(ls => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls) }
+  const bulkReady = bulkLines.filter(l => l.prod_name && (parseFloat(l.units) || 0) > 0)
+
+  async function submitBulk() {
+    if (!bulkLoc.trim()) { setError('Enter a Location.'); return }
+    if (bulkReady.length === 0) { setError('Add at least one product with a quantity.'); return }
+    setSaving(true); setError('')
+    try {
+      const created = []
+      for (const l of bulkReady) {
+        const r = await fetch('/api/spec-orders', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({
+            account: bulkLoc, location: bulkLoc, cust_name: bulkCust, del_date: bulkDel || null, phone: bulkPhone,
+            prod_name: l.prod_name, units: l.units, price: l.price || 0, notes: l.notes, ordr_dt: date
+          })
+        })
+        const d = await r.json()
+        if (!r.ok) throw new Error(d.error)
+        created.push(d)
+      }
+      setOrders(prev => [...prev, ...created])
+      setAdding(false)
+    } catch (e) { setError(`Add failed: ${e.message}`) }
+    finally { setSaving(false) }
+  }
+
+  // Product <option>s grouped by type, for the bulk product selects
+  function productOptions() {
+    if (productTypes.length === 0) return products.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
+    return (
+      <>
+        {productTypes.map(t => (
+          <optgroup key={t} label={t}>
+            {products.filter(p => p.prod_type === t).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+          </optgroup>
+        ))}
+        {products.some(p => !p.prod_type) && (
+          <optgroup label="Other">
+            {products.filter(p => !p.prod_type).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+          </optgroup>
+        )}
+      </>
+    )
   }
 
   async function save(id, field, value) {
@@ -314,7 +374,7 @@ export default function SpecialOrders() {
             style={{ width: 50, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '3px 5px', fontSize: 12 }} />
         </label>
         <button className="btn btn-secondary btn-sm" onClick={printSheets} title="Print special order sheets (one per customer/location)">🖨 Print Sheets</button>
-        {!adding && <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add Special Order</button>}
+        {!adding && <button className="btn btn-primary btn-sm" onClick={openBulkAdd}>+ Add Special Order</button>}
       </div>
 
       {/* Repeat row */}
@@ -339,6 +399,87 @@ export default function SpecialOrders() {
       </div>
 
       {error && <div className="error-message">{error}</div>}
+
+      {/* Bulk add panel: choose Location/Customer once, then add many product lines at once */}
+      {adding && (
+        <div className="section-card" style={{ marginBottom: 12, padding: 12 }}>
+          <div style={{ display: 'flex', gap: 14, flexWrap: 'wrap', marginBottom: 10, alignItems: 'flex-end' }}>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}>
+              Location *
+              <input type="text" autoFocus value={bulkLoc} list="spec-locations" placeholder="Location"
+                onChange={e => setBulkLoc(e.target.value)}
+                style={{ border: '2px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 180 }} />
+              <datalist id="spec-locations">{locations.map(l => <option key={l} value={l} />)}</datalist>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}>
+              Customer name
+              <input type="text" value={bulkCust} placeholder="Customer name" onChange={e => setBulkCust(e.target.value)}
+                style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 160 }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}>
+              Delivery date
+              <input type="date" value={bulkDel} onChange={e => setBulkDel(e.target.value)}
+                style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13 }} />
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}>
+              Phone
+              <input type="text" value={bulkPhone} placeholder="Phone" onChange={e => setBulkPhone(e.target.value)}
+                style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 130 }} />
+            </label>
+          </div>
+
+          <table className="data-grid" style={{ width: '100%' }}>
+            <thead>
+              <tr>
+                <th style={{ minWidth: 200 }}>Product</th>
+                <th style={{ width: 90, textAlign: 'right' }}>Qty</th>
+                <th style={{ width: 90, textAlign: 'right' }}>Price</th>
+                <th style={{ minWidth: 180 }}>Notes</th>
+                <th style={{ width: 36 }}></th>
+              </tr>
+            </thead>
+            <tbody>
+              {bulkLines.map((l, i) => (
+                <tr key={i}>
+                  <td>
+                    <select value={l.prod_name} onChange={e => setLine(i, 'prod_name', e.target.value)}
+                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
+                      <option value="">— product —</option>
+                      {productOptions()}
+                    </select>
+                  </td>
+                  <td>
+                    <input type="number" value={l.units} onChange={e => setLine(i, 'units', e.target.value)}
+                      onKeyDown={e => { if (e.key === 'Enter' && i === bulkLines.length - 1) addLine() }}
+                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', textAlign: 'right', fontSize: 13 }} />
+                  </td>
+                  <td>
+                    <input type="number" value={l.price} placeholder="0" onChange={e => setLine(i, 'price', e.target.value)}
+                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', textAlign: 'right', fontSize: 13 }} />
+                  </td>
+                  <td>
+                    <input type="text" value={l.notes} placeholder="Notes" onChange={e => setLine(i, 'notes', e.target.value)}
+                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
+                  </td>
+                  <td style={{ textAlign: 'center' }}>
+                    <button className="btn btn-danger btn-sm" style={{ padding: '2px 6px', fontSize: 11 }}
+                      onClick={() => removeLine(i)} title="Remove this line" disabled={bulkLines.length === 1}>✕</button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+
+          <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button className="btn btn-secondary btn-sm" onClick={addLine}>+ Add product line</button>
+            <div style={{ flex: 1 }} />
+            <button className="btn btn-primary" onClick={submitBulk} disabled={saving || bulkReady.length === 0 || !bulkLoc.trim()}>
+              {saving ? 'Adding…' : `Add All (${bulkReady.length})`}
+            </button>
+            <button className="btn btn-secondary" onClick={() => setAdding(false)} disabled={saving}>Cancel</button>
+          </div>
+        </div>
+      )}
 
       <div style={{ display: 'flex', gap: 16, alignItems: 'flex-start' }}>
         {/* Calendar sidebar */}
@@ -399,71 +540,6 @@ export default function SpecialOrders() {
                     </tr>
                   ))}
 
-                  {adding && (
-                    <tr style={{ background: 'var(--cell-edit-bg)' }}>
-                      <td>
-                        <input type="text" autoFocus placeholder="Location" value={newRow.location} list="spec-locations"
-                          onChange={e => setNewRow(p => ({ ...p, location: e.target.value }))}
-                          style={{ width: '100%', border: '2px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                        <datalist id="spec-locations">
-                          {locations.map(l => <option key={l} value={l} />)}
-                        </datalist>
-                      </td>
-                      <td>
-                        <input type="text" placeholder="Customer name" value={newRow.cust_name}
-                          onChange={e => setNewRow(p => ({ ...p, cust_name: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                      </td>
-                      <td>
-                        {productTypes.length > 0 && (
-                          <>
-                            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Type</div>
-                            <select value={newType}
-                              onChange={e => { setNewType(e.target.value); setNewRow(p => ({ ...p, prod_name: '' })) }}
-                              title="Pick a type to narrow the product list"
-                              style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 12, marginBottom: 5 }}>
-                              <option value="">— all types —</option>
-                              {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
-                            </select>
-                            <div style={{ fontSize: 9, color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.04em' }}>Product</div>
-                          </>
-                        )}
-                        <select value={newRow.prod_name} onChange={e => setNewRow(p => ({ ...p, prod_name: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
-                          <option value="">— product —</option>
-                          {(newType ? products.filter(p => p.prod_type === newType) : products)
-                            .map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
-                        </select>
-                      </td>
-                      <td>
-                        <input type="number" value={newRow.units} onChange={e => setNewRow(p => ({ ...p, units: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', textAlign: 'right', fontSize: 13 }} />
-                      </td>
-                      <td>
-                        <input type="number" value={newRow.price} onChange={e => setNewRow(p => ({ ...p, price: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', textAlign: 'right', fontSize: 13 }} />
-                      </td>
-                      <td>
-                        <input type="date" value={newRow.del_date} onChange={e => setNewRow(p => ({ ...p, del_date: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                      </td>
-                      <td>
-                        <input type="text" placeholder="Phone" value={newRow.phone}
-                          onChange={e => setNewRow(p => ({ ...p, phone: e.target.value }))}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                      </td>
-                      <td>
-                        <input type="text" placeholder="Notes" value={newRow.notes}
-                          onChange={e => setNewRow(p => ({ ...p, notes: e.target.value }))}
-                          onKeyDown={e => { if (e.key === 'Enter') addOrder(); if (e.key === 'Escape') { setAdding(false); setNewRow(EMPTY); setNewType('') } }}
-                          style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
-                      </td>
-                      <td style={{ whiteSpace: 'nowrap' }}>
-                        <button className="btn btn-primary btn-sm" style={{ marginRight: 4 }} onClick={addOrder}>Add</button>
-                        <button className="btn btn-secondary btn-sm" onClick={() => { setAdding(false); setNewRow(EMPTY); setNewType('') }}>✕</button>
-                      </td>
-                    </tr>
-                  )}
 
                   {filtered.length === 0 && !adding && (
                     <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
