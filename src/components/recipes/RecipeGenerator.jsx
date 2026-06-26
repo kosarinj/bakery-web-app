@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
+function trim(n) { const v = parseFloat(n); return v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '') }
 
 function fmt(n, unit) {
   if (!n || n === 0) return ''
@@ -14,22 +15,18 @@ function fmt(n, unit) {
 function IngredientRow({ row, scale, editing, onSave }) {
   if (row.space) return <tr><td colSpan={6} style={{ height: 8 }} /></tr>
   if (row.rectext && !row.ingredient) {
-    return (
-      <tr><td colSpan={6} style={{ fontWeight: 600, fontStyle: 'italic', paddingTop: 8, paddingBottom: 4, color: 'var(--primary)' }}>{row.rectext}</td></tr>
-    )
+    return <tr><td colSpan={6} style={{ fontWeight: 600, fontStyle: 'italic', paddingTop: 8, paddingBottom: 4, color: 'var(--primary)' }}>{row.rectext}</td></tr>
   }
   const cell = (field, unit) => {
     const base = num(row[field])
     if (editing) {
       return (
-        <input
-          type="number" step="any" defaultValue={base || ''} placeholder="0"
+        <input type="number" step="any" defaultValue={base || ''} placeholder="0"
           onClick={e => e.stopPropagation()}
           onKeyDown={e => { if (e.key === 'Enter') e.target.blur() }}
           onBlur={e => { const v = num(e.target.value); if (v !== base) onSave(row.id, field, v) }}
           style={{ width: 58, textAlign: 'right', border: '1px solid var(--primary)', borderRadius: 'var(--radius-sm)', padding: '2px 4px', fontSize: 12, background: 'var(--cell-edit-bg)' }}
-          title={`Base per-batch ${unit}`}
-        />
+          title={`Base per-batch ${unit}`} />
       )
     }
     return fmt(base * scale, unit)
@@ -46,54 +43,39 @@ function IngredientRow({ row, scale, editing, onSave }) {
   )
 }
 
-function RecipeCard({ title, type, baseBatches, units, products, recipe, onError }) {
+function RecipeCard({ kind, item, onBatches, onField }) {
   const [open, setOpen]       = useState(true)
   const [editing, setEditing] = useState(false)
-  const [batches, setBatches] = useState(baseBatches)
-  const [rows, setRows]       = useState(recipe || [])
-
-  // Re-sync when a fresh generation comes in
-  useEffect(() => { setRows(recipe || []); setBatches(baseBatches); setEditing(false) }, [recipe, baseBatches])
-
-  const scale = num(batches)
-
-  async function saveField(rowId, field, value) {
-    setRows(rs => rs.map(r => r.id === rowId ? { ...r, [field]: value } : r))
-    try {
-      const r = await fetch(`/api/recipes/${rowId}`, {
-        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ [field]: value })
-      })
-      if (!r.ok) throw new Error((await r.json()).error || 'save failed')
-    } catch (e) { onError && onError(`Recipe save failed: ${e.message}`) }
-  }
-
-  const stop = e => e.stopPropagation()
+  const title = kind === 'batch' ? item.group : item.prod_name
+  const units = kind === 'batch' ? item.total_equiv : item.units
+  const rows  = item.recipe || []
+  const scale = num(item.batches)
+  const stop  = e => e.stopPropagation()
 
   return (
     <div className="section-card" style={{ marginBottom: 10 }}>
       <div className="card-header" style={{ cursor: 'pointer', display: 'flex', alignItems: 'center', gap: 10, flexWrap: 'wrap' }} onClick={() => setOpen(o => !o)}>
         <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>{open ? '▲' : '▼'}</span>
         <span style={{ fontWeight: 700, fontSize: 14 }}>{title}</span>
-        <span className={`badge ${type === 'batch' ? 'badge-purple' : 'badge-blue'}`}>{type === 'batch' ? 'Batch' : 'Mult'}</span>
+        <span className={`badge ${kind === 'batch' ? 'badge-purple' : 'badge-blue'}`}>{kind === 'batch' ? 'Batch' : 'Mult'}</span>
 
         <label onClick={stop} style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 12, color: 'var(--text-muted)' }}
-          title="Number of batches to scale the recipe by (adjust for this view)">
+          title="Number of batches to scale the recipe by">
           Batches:
-          <input type="number" step="any" min="0" value={batches}
-            onChange={e => setBatches(e.target.value)}
+          <input type="number" step="any" min="0" value={item.batches}
+            onChange={e => onBatches(e.target.value)}
             style={{ width: 56, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '2px 5px', fontSize: 13, fontWeight: 700, textAlign: 'right' }} />
-          {num(batches) !== num(baseBatches) && (
+          {num(item.batches) !== num(item.calcBatches) && (
             <button className="btn btn-secondary btn-sm" style={{ padding: '1px 6px', fontSize: 11 }}
-              onClick={() => setBatches(baseBatches)} title={`Reset to calculated (${baseBatches})`}>↺</button>
+              onClick={() => onBatches(item.calcBatches)} title={`Reset to calculated (${item.calcBatches})`}>↺</button>
           )}
         </label>
 
         <span style={{ fontSize: 13, color: 'var(--text-muted)' }}>{Math.round(units)} units</span>
 
-        {products && products.length > 1 && (
+        {item.products && item.products.length > 1 && (
           <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            ({products.map(p => `${p.prod_name} ×${Math.round(p.units)}`).join(', ')})
+            ({item.products.map(p => `${p.prod_name} ×${Math.round(p.units)}`).join(', ')})
           </span>
         )}
 
@@ -125,7 +107,8 @@ function RecipeCard({ title, type, baseBatches, units, products, recipe, onError
               </thead>
               <tbody>
                 {rows.map((ing, i) => (
-                  <IngredientRow key={ing.id ?? i} row={ing} scale={scale} editing={editing} onSave={saveField} />
+                  <IngredientRow key={ing.id ?? i} row={ing} scale={scale} editing={editing}
+                    onSave={(rowId, field, value) => onField(rowId, field, value)} />
                 ))}
               </tbody>
             </table>
@@ -144,11 +127,12 @@ export default function RecipeGenerator() {
   const [search, setSearch]   = useState('')
   const [showBatch, setShowBatch] = useState(true)
   const [showMult,  setShowMult]  = useState(true)
+  const [bakeryName, setBakeryName] = useState('')
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
-      .then(s => setDate(s.baking_date || new Date().toISOString().slice(0, 10)))
+      .then(s => { setDate(s.baking_date || new Date().toISOString().slice(0, 10)); setBakeryName(s.bakery_name || '') })
       .catch(() => setDate(new Date().toISOString().slice(0, 10)))
   }, [])
 
@@ -159,9 +143,103 @@ export default function RecipeGenerator() {
       const r = await fetch(`/api/recipe-generator?date=${date}`, { credentials: 'include' })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
+      // Remember the calculated batch count so the batch override can reset to it
+      d.batch_groups = (d.batch_groups || []).map(g => ({ ...g, calcBatches: g.batches }))
+      d.mult_products = (d.mult_products || []).map(p => ({ ...p, calcBatches: p.batches }))
       setData(d)
     } catch (e) { setError(e.message) }
     finally { setLoading(false) }
+  }
+
+  function setBatches(kind, key, batches) {
+    setData(d => {
+      if (!d) return d
+      const arr = kind === 'batch' ? 'batch_groups' : 'mult_products'
+      const idf = kind === 'batch' ? 'group' : 'prod_name'
+      return { ...d, [arr]: d[arr].map(it => it[idf] === key ? { ...it, batches } : it) }
+    })
+  }
+
+  async function saveField(kind, key, rowId, field, value) {
+    setData(d => {
+      if (!d) return d
+      const arr = kind === 'batch' ? 'batch_groups' : 'mult_products'
+      const idf = kind === 'batch' ? 'group' : 'prod_name'
+      return { ...d, [arr]: d[arr].map(it => it[idf] === key
+        ? { ...it, recipe: it.recipe.map(r => r.id === rowId ? { ...r, [field]: value } : r) } : it) }
+    })
+    try {
+      const r = await fetch(`/api/recipes/${rowId}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ [field]: value })
+      })
+      if (!r.ok) throw new Error((await r.json()).error || 'save failed')
+    } catch (e) { setError(`Recipe save failed: ${e.message}`) }
+  }
+
+  // Print the generated recipes — replicates the VB6 "bakerec" report ("<Bakery> Recipe"):
+  // one recipe per product/group, with scaled ingredient lines. Uses current batch counts & edits.
+  function printRecipes() {
+    if (!data) return
+    const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+    const cards = [
+      ...(showBatch ? filteredBatch.map(g => ({ kind: 'batch', title: g.group, units: g.total_equiv, batches: num(g.batches), recipe: g.recipe, products: g.products })) : []),
+      ...(showMult ? filteredMult.map(p => ({ kind: 'mult', title: p.prod_name, units: p.units, batches: num(p.batches), recipe: p.recipe, products: null })) : []),
+    ]
+    if (cards.length === 0) { setError('Nothing to print — generate recipes first.'); return }
+
+    const line = (row, scale) => {
+      if (row.space) return '<div class="sp"></div>'
+      if (row.rectext && !row.ingredient) return `<div class="sec">${esc(row.rectext)}</div>`
+      const parts = []
+      const lbs = num(row.pounds) * scale, cups = num(row.cups) * scale, tbsp = num(row.tablespoons) * scale, tsp = num(row.teaspoons) * scale, qty = num(row.qty) * scale
+      if (lbs)  parts.push(`${trim(lbs)} lbs.`)
+      if (cups) parts.push(`${trim(cups)} cup(s)`)
+      if (tbsp) parts.push(`${trim(tbsp)} tbsp`)
+      if (tsp)  parts.push(`${trim(tsp)} tsp`)
+      if (qty)  parts.push(`${trim(qty)} ${esc(row.ingr_unit || '')}`.trim())
+      return `<div class="ing"><span class="nm">${esc(row.ingredient)}:</span> ${parts.join('  ')}</div>`
+    }
+
+    const blocks = cards.map(c => {
+      const body = (c.recipe || []).map(r => line(r, c.batches)).join('')
+      const sub = c.products && c.products.length > 1
+        ? `<div class="prods">${esc(c.products.map(p => `${p.prod_name} ×${Math.round(p.units)}`).join(', '))}</div>` : ''
+      return `<div class="recipe">
+        <h2>${esc(c.title)} <span class="meta">— ${trim(c.batches)} batch${num(c.batches) !== 1 ? 'es' : ''} · ${Math.round(c.units)} units</span></h2>
+        ${sub}
+        ${body || '<div class="ing">No recipe.</div>'}
+      </div>`
+    }).join('')
+
+    const title = (bakeryName ? `${bakeryName} ` : '') + 'Recipe'
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)} ${date}</title><style>
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:.4in}
+      h1{font-family:"Book Antiqua","Palatino Linotype",Georgia,serif;font-size:22px;margin:0 0 4px}
+      .date{font-size:12px;color:#444;margin-bottom:14px}
+      .recipe{page-break-inside:avoid;margin:0 0 18px;padding-bottom:10px;border-bottom:1px solid #bbb}
+      .recipe h2{font-size:16px;margin:0 0 6px}
+      .recipe h2 .meta{font-weight:400;font-size:12px;color:#555}
+      .prods{font-size:11px;color:#666;margin:0 0 6px}
+      .ing{font-size:13px;margin:2px 0;padding-left:8px}
+      .ing .nm{font-weight:700;display:inline-block;min-width:120px}
+      .sec{font-size:13px;font-weight:700;font-style:italic;margin:8px 0 2px;color:#222}
+      .sp{height:7px}
+      @page{margin:.5in}
+    </style></head><body>
+      <h1>${esc(title)}</h1>
+      <div class="date">Baking date: ${date}</div>
+      ${blocks}
+    </body></html>`
+
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open(); doc.write(html); doc.close()
+    iframe.contentWindow.focus()
+    setTimeout(() => { iframe.contentWindow.print(); setTimeout(() => document.body.removeChild(iframe), 1500) }, 300)
   }
 
   const q = search.toLowerCase()
@@ -180,6 +258,7 @@ export default function RecipeGenerator() {
         </button>
         {data && (
           <>
+            <button className="btn btn-secondary" onClick={printRecipes} title="Print the generated recipes">🖨 Print Recipes</button>
             <input type="text" placeholder="Search recipes…" value={search} onChange={e => setSearch(e.target.value)}
               style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 200 }} />
             <div style={{ display: 'flex', gap: 4 }}>
@@ -206,9 +285,9 @@ export default function RecipeGenerator() {
             Batch Recipes ({filteredBatch.length})
           </div>
           {filteredBatch.map(g => (
-            <RecipeCard key={g.group} title={g.group} type="batch"
-              baseBatches={g.batches} units={g.total_equiv}
-              products={g.products} recipe={g.recipe} onError={setError} />
+            <RecipeCard key={g.group} kind="batch" item={g}
+              onBatches={v => setBatches('batch', g.group, v)}
+              onField={(rowId, field, value) => saveField('batch', g.group, rowId, field, value)} />
           ))}
         </div>
       )}
@@ -219,9 +298,9 @@ export default function RecipeGenerator() {
             Multiplier Recipes ({filteredMult.length})
           </div>
           {filteredMult.map(p => (
-            <RecipeCard key={p.prod_name} title={p.prod_name} type="mult"
-              baseBatches={p.batches} units={p.units}
-              products={null} recipe={p.recipe} onError={setError} />
+            <RecipeCard key={p.prod_name} kind="mult" item={p}
+              onBatches={v => setBatches('mult', p.prod_name, v)}
+              onField={(rowId, field, value) => saveField('mult', p.prod_name, rowId, field, value)} />
           ))}
         </div>
       )}
