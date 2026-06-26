@@ -256,6 +256,14 @@ export async function importRecipes(tbl, q) {
   const products = [...new Set(rows.map(r => r.product))]
   if (products.length) {
     await q(`DELETE FROM recipes WHERE product = ANY($1::text[])`, [products])
+    // Recipes may be keyed by a GROUP name (e.g. "CC COOKIE", "BANANA") that isn't a product.
+    // Create inactive stub products so those group recipes aren't dropped by the FK / filter below.
+    await q(`INSERT INTO products(prod_name, active) SELECT unnest($1::text[]), false ON CONFLICT (prod_name) DO NOTHING`, [products])
+  }
+  // Likewise ensure every recipe ingredient exists (create stub ingredients as needed)
+  const recIngredients = [...new Set(rows.map(r => r.ingredient).filter(Boolean))]
+  if (recIngredients.length) {
+    await q(`INSERT INTO ingredients(name) SELECT unnest($1::text[]) ON CONFLICT (name) DO NOTHING`, [recIngredients])
   }
 
   const cols  = ['product','ingredient','sequence','rectext','teaspoons','tablespoons','cups','pounds','space','rec_group','qty']
