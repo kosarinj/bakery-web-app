@@ -122,6 +122,7 @@ export default function SpecialOrders() {
   const [dates, setDates]       = useState([])
   const [showCal, setShowCal]   = useState(false)
   const [bakeryName, setBakeryName] = useState('')
+  const [locFont, setLocFont]   = useState(() => parseInt(localStorage.getItem('specord_locFont')) || 32)
 
   // Copy/repeat state
   const [copyFrom, setCopyFrom]       = useState('')
@@ -243,7 +244,7 @@ export default function SpecialOrders() {
         <div class="meta"><span class="lbl">Order Date:</span> ${dateStr}</div>
         <div class="meta"><span class="lbl">Customer:</span> ${esc(g.account)}</div>
         ${g.cust_name ? `<div class="meta"><span class="lbl">Name:</span> ${esc(g.cust_name)}</div>` : ''}
-        <div class="meta"><span class="lbl">Location:</span> ${esc(g.location)}</div>
+        <div class="meta loc"><span class="lbl">Location:</span> <span class="locval">${esc(g.location)}</span></div>
         <table>
           <thead><tr><th class="qty">Qty</th><th>Product Name</th><th class="num">Price</th><th class="notes">Notes</th><th class="num">Subtotal</th></tr></thead>
           <tbody>${rows}</tbody>
@@ -259,7 +260,9 @@ export default function SpecialOrders() {
       .sheet:last-child{page-break-after:auto}
       h1{font-family:"Book Antiqua","Palatino Linotype",Georgia,serif;font-size:24px;font-weight:700;margin:0 0 14px}
       .meta{font-size:13px;margin:2px 0}
-      .meta .lbl{display:inline-block;width:95px;font-weight:700}
+      .meta .lbl{display:inline-block;width:95px;font-weight:700;vertical-align:middle}
+      .loc{margin:6px 0}
+      .locval{font-size:${Math.max(10, Math.min(72, locFont))}px;font-weight:700;vertical-align:middle}
       table{width:100%;border-collapse:collapse;margin-top:14px;font-size:13px}
       th{text-align:left;border-bottom:2px solid #000;padding:5px 6px;font-style:italic;color:#004000}
       td{padding:4px 6px;border-bottom:1px solid #ccc;vertical-align:top}
@@ -303,6 +306,13 @@ export default function SpecialOrders() {
         )}
         <span className="toolbar-info">{filtered.length}{copyLocation ? ` of ${orders.length}` : ''} orders · {totalUnits} units · ${totalRev.toFixed(2)}</span>
         <div className="toolbar-spacer" />
+        <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}
+          title="Font size of the Location name on the printed sheet">
+          Loc font:
+          <input type="number" min="10" max="72" value={locFont}
+            onChange={e => { const v = Math.max(10, Math.min(72, parseInt(e.target.value) || 32)); setLocFont(v); localStorage.setItem('specord_locFont', v) }}
+            style={{ width: 50, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '3px 5px', fontSize: 12 }} />
+        </label>
         <button className="btn btn-secondary btn-sm" onClick={printSheets} title="Print special order sheets (one per customer/location)">🖨 Print Sheets</button>
         {!adding && <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add Special Order</button>}
       </div>
