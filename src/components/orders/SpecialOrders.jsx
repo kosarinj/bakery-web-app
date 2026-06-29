@@ -275,12 +275,12 @@ export default function SpecialOrders() {
 
   // Print Special Order sheets — replicates the original VB6 "custreport" (spcrpt.Dsr):
   // one sheet per Customer + Location, grouped, with Qty / Product / Price / Notes / Subtotal and a Total.
-  function printSheets() {
+  // Core renderer: takes an explicit list of order rows so it can print one order,
+  // one location, or the whole day. Grouped by Location → one sheet per location.
+  function printItems(items) {
     const esc = s => String(s ?? '').replace(/[&<>"]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
     const money = n => '$' + (Number(n) || 0).toFixed(2)
-    // Same data rule as the VB report: only lines with units > 0, honoring the location filter.
-    const items = orders.filter(o => (parseFloat(o.units) || 0) > 0 && (!copyLocation || (o.location || '') === copyLocation))
-    if (items.length === 0) { setError('No special orders with quantities to print for this date.'); return }
+    if (!items || items.length === 0) { setError('Nothing to print.'); return }
 
     // Group by Location — each location prints on its own sheet.
     const groups = []; const map = new Map()
@@ -346,6 +346,17 @@ export default function SpecialOrders() {
     }, 300)
   }
 
+  // Print every order for the day with units > 0, honoring the Location filter
+  // (one sheet per location). This is the bulk "Print Sheets" button.
+  function printSheets() {
+    const items = orders.filter(o => (parseFloat(o.units) || 0) > 0 && (!copyLocation || (o.location || '') === copyLocation))
+    if (items.length === 0) { setError('No special orders with quantities to print for this date.'); return }
+    printItems(items)
+  }
+
+  // Print a single order on its own sheet — used to tuck a slip in with that order.
+  function printOne(o) { printItems([o]) }
+
   // Distinct product types for the Add-row type filter
   const productTypes = [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
 
@@ -373,7 +384,10 @@ export default function SpecialOrders() {
             onChange={e => { const v = Math.max(10, Math.min(72, parseInt(e.target.value) || 32)); setLocFont(v); localStorage.setItem('specord_locFont', v) }}
             style={{ width: 50, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '3px 5px', fontSize: 12 }} />
         </label>
-        <button className="btn btn-secondary btn-sm" onClick={printSheets} title="Print special order sheets (one per customer/location)">🖨 Print Sheets</button>
+        <button className="btn btn-secondary btn-sm" onClick={printSheets}
+          title={copyLocation ? `Print one sheet for ${copyLocation}` : 'Print one sheet per location for all orders this day'}>
+          🖨 {copyLocation ? `Print ${copyLocation}` : 'Print Sheets'}
+        </button>
         {!adding && <button className="btn btn-primary btn-sm" onClick={openBulkAdd}>+ Add Special Order</button>}
       </div>
 
@@ -514,6 +528,7 @@ export default function SpecialOrders() {
                     <th style={{ minWidth: 120 }}>Phone</th>
                     <th style={{ minWidth: 200 }}>Notes</th>
                     <th style={{ width: 40, textAlign: 'center' }} title="Checked">✓</th>
+                    <th style={{ width: 40, textAlign: 'center' }} title="Print this single order">🖨</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -537,12 +552,17 @@ export default function SpecialOrders() {
                           title="Uncheck to mark this order off — it stays in the list"
                           style={{ width: 16, height: 16, cursor: 'pointer' }} />
                       </td>
+                      <td style={{ textAlign: 'center' }}>
+                        <button type="button" onClick={() => printOne(o)}
+                          title={`Print this order${o.location ? ` for ${o.location}` : ''} on its own sheet`}
+                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '2px 4px' }}>🖨</button>
+                      </td>
                     </tr>
                   ))}
 
 
                   {filtered.length === 0 && !adding && (
-                    <tr><td colSpan={9} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                    <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                       {copyLocation
                         ? <>No special orders for {date} at location <strong>{copyLocation}</strong>.</>
                         : <>No special orders for {date}.</>}

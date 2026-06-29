@@ -71,6 +71,11 @@ export default function Layout({ user, setUser }) {
           <span className="brand-name">{bakeryName}</span>
         </div>
         <div className="header-right">
+          <span className="release-stamp"
+            title={`Last release: ${new Date(__BUILD_TIME__).toLocaleString()}`}
+            style={{ fontSize: 11, opacity: 0.5, whiteSpace: 'nowrap' }}>
+            {new Date(__BUILD_TIME__).toLocaleString('en-US', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+          </span>
           <span className="username">{user.username}</span>
           <button className="btn-logout" onClick={logout}>Sign Out</button>
         </div>

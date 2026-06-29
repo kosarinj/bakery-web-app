@@ -440,28 +440,46 @@ app.post('/api/orders/delete-account', requireAuth, async (req, res) => {
 
 // Copy orders from one date to another (skips account+product pairs already entered on to_date)
 // Optional: accounts array limits which accounts are copied
+// Optional: percentages { accountName: percent } scales each account's units (default 100%)
 app.post('/api/orders/copy', requireAuth, async (req, res) => {
-  const { from_date, to_date, accounts } = req.body
+  const { from_date, to_date, accounts, percentages } = req.body
   if (!from_date || !to_date) return res.status(400).json({ error: 'from_date and to_date required' })
   const hasAcctFilter = Array.isArray(accounts) && accounts.length > 0
+
+  // Build parameter list dynamically so the optional account filter and the
+  // per-account percentage map can each claim their own placeholder numbers.
+  const params = [from_date, to_date]
+  let acctClause = ''
+  if (hasAcctFilter) { params.push(accounts); acctClause = `AND f.account = ANY($${params.length}::text[])` }
+
+  const pctObj = (percentages && typeof percentages === 'object' && !Array.isArray(percentages)) ? percentages : {}
+  const pctAccounts = Object.keys(pctObj)
+  const pctValues = pctAccounts.map(k => { const n = Number(pctObj[k]); return Number.isFinite(n) && n >= 0 ? n : 100 })
+  params.push(pctAccounts); const accIdx = params.length
+  params.push(pctValues); const valIdx = params.length
+
+  // Base repeatable units (last week minus special/postbake), then scaled by the
+  // account's percentage (default 100 when not listed) and rounded to whole units.
+  const baseUnits = `GREATEST(0, f.units - COALESCE(f.special_ords, 0) - COALESCE(f.postbake_adj, 0))`
+  const scaledUnits = `ROUND(${baseUnits} * COALESCE(p.factor, 100) / 100.0)`
+
   try {
     const { rows } = await query(`
       INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, del_date, last_update)
       SELECT f.prod_name, f.account,
-             GREATEST(0, f.units
-               - COALESCE(f.special_ords, 0)
-               - COALESCE(f.postbake_adj, 0)) AS units,
+             ${scaledUnits} AS units,
              f.wprice, f.rprice,
              $2::date,
              $2::date + COALESCE(a.postord::int, 0),
              NOW()
       FROM daily_orders f
       JOIN accounts a ON a.name = f.account
+      LEFT JOIN (
+        SELECT UNNEST($${accIdx}::text[]) AS account, UNNEST($${valIdx}::numeric[]) AS factor
+      ) p ON p.account = f.account
       WHERE f.ordr_dt = $1
-        ${hasAcctFilter ? 'AND f.account = ANY($3::text[])' : ''}
-        AND GREATEST(0, f.units
-              - COALESCE(f.special_ords, 0)
-              - COALESCE(f.postbake_adj, 0)) > 0
+        ${acctClause}
+        AND ${scaledUnits} > 0
         AND NOT EXISTS (
           SELECT 1 FROM daily_orders e
           WHERE e.prod_name = f.prod_name
@@ -469,8 +487,9 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
             AND e.ordr_dt = $2::date
         )
       RETURNING *
-    `, hasAcctFilter ? [from_date, to_date, accounts] : [from_date, to_date])
-    await logActivity(req, 'repeat_orders', `Copied ${rows.length} orders from ${from_date} to ${to_date}`)
+    `, params)
+    const pctNote = pctAccounts.length ? ` (${pctAccounts.length} account % adjustments)` : ''
+    await logActivity(req, 'repeat_orders', `Copied ${rows.length} orders from ${from_date} to ${to_date}${pctNote}`)
     res.json({ copied: rows.length, rows })
   } catch (e) {
     await logActivity(req, 'repeat_orders_error', `Error copying orders from ${from_date} to ${to_date}: ${e.message}`)

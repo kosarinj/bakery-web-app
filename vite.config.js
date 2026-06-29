@@ -7,6 +7,9 @@ export default defineConfig({
     react(),
     nodePolyfills({ include: ['buffer', 'stream', 'events', 'util', 'process'] }),
   ],
+  define: {
+    __BUILD_TIME__: JSON.stringify(new Date().toISOString()),
+  },
   server: {
     port: 5174,
     proxy: {

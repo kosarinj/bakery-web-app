@@ -109,6 +109,7 @@ export default function OrdersGrid() {
   const [copyMsg, setCopyMsg] = useState('')
   const [showRepeatAccounts, setShowRepeatAccounts] = useState(false)
   const [repeatAccounts, setRepeatAccounts] = useState(null) // null = all
+  const [repeatPercents, setRepeatPercents] = useState({}) // account → percent of last week (default 100)
   const [clearAccount, setClearAccount] = useState('')
 
   const orderMapRef = useRef({})
@@ -229,10 +230,17 @@ export default function OrdersGrid() {
     if (!copyFrom || !copyTo) return
     setCopying(true); setCopyMsg(''); setError('')
     const accountsList = repeatAccounts ? [...repeatAccounts] : null
+    // Only send percentages that differ from the 100% default
+    const percentages = {}
+    Object.entries(repeatPercents).forEach(([acct, pct]) => {
+      const n = Number(pct)
+      if (Number.isFinite(n) && n >= 0 && n !== 100) percentages[acct] = n
+    })
+    const hasPercents = Object.keys(percentages).length > 0
     try {
       const r = await fetch('/api/orders/copy', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, ...(accountsList ? { accounts: accountsList } : {}) })
+        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, ...(accountsList ? { accounts: accountsList } : {}), ...(hasPercents ? { percentages } : {}) })
       })
       const data = await r.json()
       if (!r.ok) throw new Error(data.error)
@@ -485,13 +493,18 @@ export default function OrdersGrid() {
               ✓ Accounts with Orders
             </button>
             <button className="btn btn-secondary btn-sm"
+              onClick={() => setRepeatPercents({})} title="Reset every account back to 100%">Reset %</button>
+            <button className="btn btn-secondary btn-sm"
               onClick={() => { setRepeatAccounts(null); setShowRepeatAccounts(false) }}>
               Clear filter
             </button>
           </div>
+          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
+            Set each checked account's repeat amount as a % of last week (default 100%). e.g. Tucker Square 100, Abingdon 80.
+          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
             {accounts.map(a => (
-              <label key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', minWidth: 160 }}>
+              <label key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', minWidth: 210 }}>
                 <input type="checkbox"
                   checked={repeatAccounts.has(a.name)}
                   onChange={e => {
@@ -499,7 +512,14 @@ export default function OrdersGrid() {
                     e.target.checked ? next.add(a.name) : next.delete(a.name)
                     setRepeatAccounts(next)
                   }} />
-                {a.name}
+                <span style={{ flex: 1 }}>{a.name}</span>
+                <input type="number" min="0" max="100" step="5"
+                  value={repeatPercents[a.name] ?? 100}
+                  onClick={e => e.stopPropagation()}
+                  onChange={e => setRepeatPercents(prev => ({ ...prev, [a.name]: e.target.value }))}
+                  title={`Repeat ${a.name} at this % of last week`}
+                  style={{ width: 50, padding: '1px 4px', fontSize: 12, textAlign: 'right' }} />
+                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
               </label>
             ))}
           </div>
