@@ -1,5 +1,6 @@
 import { useState, useEffect, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
+import useLiveRefresh from '../../hooks/useLiveRefresh'
 
 const EMPTY = { account: '', cust_name: '', location: '', prod_name: '', units: 0, price: 0, del_date: '', phone: '', notes: '' }
 
@@ -171,12 +172,15 @@ export default function SpecialOrders() {
 
   useEffect(() => { if (date) load() }, [date])
 
-  function load() {
-    setLoading(true)
+  // Live: refetch (quietly, no loading flash) when another user changes special orders.
+  useLiveRefresh('spec-orders', () => { if (date) load(true) })
+
+  function load(quiet) {
+    if (!quiet) setLoading(true)
     fetch(`/api/spec-orders?date=${date}`, { credentials: 'include' })
       .then(r => r.json())
-      .then(d => { setOrders(Array.isArray(d) ? d : []); setLoading(false) })
-      .catch(e => { setError(e.message); setLoading(false) })
+      .then(d => { setOrders(Array.isArray(d) ? d : []); if (!quiet) setLoading(false) })
+      .catch(e => { setError(e.message); if (!quiet) setLoading(false) })
   }
 
   // Attach prod_type / prod_group from the products list so just-added rows show

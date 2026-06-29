@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
+import useLiveRefresh from '../../hooks/useLiveRefresh'
 
 function prevDay(dateStr) {
   const d = new Date(dateStr + 'T00:00:00')
@@ -172,6 +173,23 @@ export default function OrdersGrid() {
       })
       .catch(e => { setError(String(e.message || e)); setLoading(false) })
   }, [date])
+
+  // Live: quietly refresh the order grid when another user changes orders.
+  const reloadOrders = useCallback(() => {
+    if (!date) return
+    fetch(`/api/orders?date=${date}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(orders => {
+        if (!Array.isArray(orders)) return
+        const map = {}
+        orders.forEach(o => {
+          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0, wprice: parseFloat(o.wprice) || 0 }
+        })
+        setOrderMap(map); orderMapRef.current = map
+      })
+      .catch(() => {})
+  }, [date])
+  useLiveRefresh('orders', reloadOrders)
 
   const saveCell = useCallback(async (account, prod_name, units, curDate) => {
     const key = `${account}|${prod_name}`

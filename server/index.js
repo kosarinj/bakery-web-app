@@ -37,6 +37,41 @@ const requireAuth = (req, res, next) => {
   next()
 }
 
+// ── Real-time fan-out via Server-Sent Events ──
+// Any logged-in client can subscribe at GET /api/events. After any successful
+// mutating /api request we broadcast which resource changed (e.g. "spec-orders"),
+// and subscribed views refetch just that data — so edits show up for everyone
+// without a manual reload.
+const sseClients = new Set()
+function broadcast(channel) {
+  const payload = `event: change\ndata: ${JSON.stringify({ channel, at: Date.now() })}\n\n`
+  for (const res of sseClients) { try { res.write(payload) } catch { /* dropped */ } }
+}
+app.use('/api', (req, res, next) => {
+  if (req.method !== 'GET' && req.method !== 'HEAD') {
+    res.on('finish', () => {
+      if (res.statusCode < 400) {
+        const seg = (req.originalUrl || '').split('?')[0].replace(/^\/api\//, '').split('/')[0]
+        if (seg && seg !== 'events') broadcast(seg)
+      }
+    })
+  }
+  next()
+})
+app.get('/api/events', requireAuth, (req, res) => {
+  res.set({
+    'Content-Type': 'text/event-stream',
+    'Cache-Control': 'no-cache, no-transform',
+    Connection: 'keep-alive',
+    'X-Accel-Buffering': 'no', // disable proxy buffering so events flush immediately
+  })
+  res.flushHeaders?.()
+  res.write(': connected\n\n')
+  sseClients.add(res)
+  const ping = setInterval(() => { try { res.write(': ping\n\n') } catch { /* closing */ } }, 25000)
+  req.on('close', () => { clearInterval(ping); sseClients.delete(res) })
+})
+
 async function logActivity(req, action, details = '') {
   try {
     await query(
