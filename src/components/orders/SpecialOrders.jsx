@@ -119,6 +119,12 @@ export default function SpecialOrders() {
   const [newRow, setNewRow]     = useState(EMPTY)
   const [newType, setNewType]   = useState('')
   const [adding, setAdding]     = useState(false)
+  // Main-table sort
+  const [sortField, setSortField] = useState('')
+  const [sortDir, setSortDir]     = useState('asc')
+  // Add panel: filter the product picker by Type / Category (prod_group)
+  const [addFilterType, setAddFilterType]   = useState('')
+  const [addFilterGroup, setAddFilterGroup] = useState('')
   // Bulk add: shared Location/Customer + many product lines added at once
   const emptyLine = () => ({ prod_name: '', units: '', price: '', notes: '' })
   const [bulkLoc, setBulkLoc]     = useState('')
@@ -173,6 +179,13 @@ export default function SpecialOrders() {
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
+  // Attach prod_type / prod_group from the products list so just-added rows show
+  // Type & Category immediately (the POST response doesn't include the product join).
+  function enrich(o) {
+    const p = products.find(pp => pp.prod_name === o.prod_name)
+    return { ...o, prod_type: o.prod_type ?? p?.prod_type ?? '', prod_group: o.prod_group ?? p?.prod_group ?? '' }
+  }
+
   async function addOrder() {
     if (!newRow.location || !newRow.prod_name) return
     try {
@@ -183,7 +196,7 @@ export default function SpecialOrders() {
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
-      setOrders(prev => [...prev, d])
+      setOrders(prev => [...prev, enrich(d)])
       setNewRow(EMPTY); setNewType(''); setAdding(false)
     } catch (e) { setError(e.message) }
   }
@@ -213,7 +226,7 @@ export default function SpecialOrders() {
         })
         const d = await r.json()
         if (!r.ok) throw new Error(d.error)
-        created.push(d)
+        created.push(enrich(d))
       }
       setOrders(prev => [...prev, ...created])
       setAdding(false)
@@ -221,19 +234,24 @@ export default function SpecialOrders() {
     finally { setSaving(false) }
   }
 
-  // Product <option>s grouped by type, for the bulk product selects
+  // Product <option>s grouped by type, for the bulk product selects.
+  // Honors the add-panel Type / Category filters so the picker can be narrowed.
   function productOptions() {
-    if (productTypes.length === 0) return products.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
+    let list = products
+    if (addFilterType)  list = list.filter(p => (p.prod_type || '') === addFilterType)
+    if (addFilterGroup) list = list.filter(p => (p.prod_group || '') === addFilterGroup)
+    const types = [...new Set(list.map(p => p.prod_type).filter(Boolean))].sort()
+    if (types.length === 0) return list.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
     return (
       <>
-        {productTypes.map(t => (
+        {types.map(t => (
           <optgroup key={t} label={t}>
-            {products.filter(p => p.prod_type === t).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+            {list.filter(p => p.prod_type === t).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
           </optgroup>
         ))}
-        {products.some(p => !p.prod_type) && (
+        {list.some(p => !p.prod_type) && (
           <optgroup label="Other">
-            {products.filter(p => !p.prod_type).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+            {list.filter(p => !p.prod_type).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
           </optgroup>
         )}
       </>
@@ -357,11 +375,34 @@ export default function SpecialOrders() {
   // Print a single order on its own sheet — used to tuck a slip in with that order.
   function printOne(o) { printItems([o]) }
 
-  // Distinct product types for the Add-row type filter
-  const productTypes = [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
+  // Distinct product Types / Categories (groups) for the Add-panel filters
+  const productTypes  = [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
+  const productGroups = [...new Set(products.map(p => p.prod_group).filter(Boolean))].sort()
 
   // The Location dropdown filters the visible table AND scopes the repeat (below).
   const filtered = copyLocation ? orders.filter(o => (o.location || '') === copyLocation) : orders
+
+  // Sortable main table
+  function toggleSort(field) {
+    if (sortField === field) setSortDir(d => (d === 'asc' ? 'desc' : 'asc'))
+    else { setSortField(field); setSortDir('asc') }
+  }
+  const sortArrow = f => (sortField === f ? (sortDir === 'asc' ? ' ▲' : ' ▼') : '')
+  const sorted = useMemo(() => {
+    if (!sortField) return filtered
+    const dir = sortDir === 'asc' ? 1 : -1
+    const val = o => {
+      if (sortField === 'units') return parseFloat(o.units) || 0
+      if (sortField === 'price') return parseFloat(o.price) || 0
+      return (o[sortField] ?? '').toString().toLowerCase()
+    }
+    return [...filtered].sort((a, b) => {
+      const av = val(a), bv = val(b)
+      if (typeof av === 'number' && typeof bv === 'number') return (av - bv) * dir
+      return String(av).localeCompare(String(bv)) * dir
+    })
+  }, [filtered, sortField, sortDir])
+
   const totalUnits = filtered.reduce((s, o) => s + (parseFloat(o.units) || 0), 0)
   const totalRev   = filtered.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
 
@@ -440,6 +481,24 @@ export default function SpecialOrders() {
               <input type="text" value={bulkPhone} placeholder="Phone" onChange={e => setBulkPhone(e.target.value)}
                 style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 130 }} />
             </label>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}
+              title="Narrow the product picker to one Type">
+              Filter: Type
+              <select value={addFilterType} onChange={e => setAddFilterType(e.target.value)}
+                style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 150, background: addFilterType ? 'var(--primary-light)' : 'var(--surface)' }}>
+                <option value="">All types</option>
+                {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+              </select>
+            </label>
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}
+              title="Narrow the product picker to one Category (product group)">
+              Filter: Category
+              <select value={addFilterGroup} onChange={e => setAddFilterGroup(e.target.value)}
+                style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 150, background: addFilterGroup ? 'var(--primary-light)' : 'var(--surface)' }}>
+                <option value="">All categories</option>
+                {productGroups.map(g => <option key={g} value={g}>{g}</option>)}
+              </select>
+            </label>
           </div>
 
           <table className="data-grid" style={{ width: '100%' }}>
@@ -516,27 +575,42 @@ export default function SpecialOrders() {
         <div style={{ flex: 1, minWidth: 0 }}>
           {loading ? <div className="loading">Loading…</div> : (
             <div className="grid-scroll-container">
-              <table className="data-grid" style={{ minWidth: 1050 }}>
+              <table className="data-grid" style={{ minWidth: 1250 }}>
                 <thead>
                   <tr>
-                    <th style={{ minWidth: 130 }}>Location</th>
-                    <th style={{ minWidth: 120 }}>Customer</th>
-                    <th style={{ minWidth: 160 }}>Product</th>
-                    <th style={{ minWidth: 70, textAlign: 'right' }}>Units</th>
-                    <th style={{ minWidth: 80, textAlign: 'right' }}>Price</th>
-                    <th style={{ minWidth: 100 }}>Del Date</th>
-                    <th style={{ minWidth: 120 }}>Phone</th>
-                    <th style={{ minWidth: 200 }}>Notes</th>
+                    {(() => {
+                      const sortable = (field, label, extra = {}) => (
+                        <th onClick={() => toggleSort(field)}
+                          title="Click to sort"
+                          style={{ cursor: 'pointer', userSelect: 'none', whiteSpace: 'nowrap', ...extra }}>
+                          {label}{sortArrow(field)}
+                        </th>
+                      )
+                      return (<>
+                        {sortable('location', 'Location', { minWidth: 130 })}
+                        {sortable('cust_name', 'Customer', { minWidth: 120 })}
+                        {sortable('prod_name', 'Product', { minWidth: 160 })}
+                        {sortable('prod_type', 'Type', { minWidth: 90 })}
+                        {sortable('prod_group', 'Category', { minWidth: 100 })}
+                        {sortable('units', 'Units', { minWidth: 70, textAlign: 'right' })}
+                        {sortable('price', 'Price', { minWidth: 80, textAlign: 'right' })}
+                        {sortable('del_date', 'Del Date', { minWidth: 100 })}
+                        {sortable('phone', 'Phone', { minWidth: 120 })}
+                        {sortable('notes', 'Notes', { minWidth: 200 })}
+                      </>)
+                    })()}
                     <th style={{ width: 40, textAlign: 'center' }} title="Checked">✓</th>
                     <th style={{ width: 40, textAlign: 'center' }} title="Print this single order">🖨</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filtered.map(o => (
+                  {sorted.map(o => (
                     <tr key={o.id} style={o.checked === false ? { opacity: 0.45 } : undefined}>
                       <td><EditableCell value={o.location||''} onSave={v=>save(o.id,'location',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
                       <td style={{ fontWeight: 500 }}>{o.prod_name}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{o.prod_type || '—'}</td>
+                      <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{o.prod_group || '—'}</td>
                       <td><EditableCell value={parseFloat(o.units)||0} onSave={v=>save(o.id,'units',v)} type="number" align="right" /></td>
                       <td><EditableCell value={parseFloat(o.price)||0} onSave={v=>save(o.id,'price',v)} type="number" align="right" formatter={v => v > 0 ? `$${parseFloat(v).toFixed(2)}` : ''} /></td>
                       <td>
@@ -562,7 +636,7 @@ export default function SpecialOrders() {
 
 
                   {filtered.length === 0 && !adding && (
-                    <tr><td colSpan={10} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                    <tr><td colSpan={12} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                       {copyLocation
                         ? <>No special orders for {date} at location <strong>{copyLocation}</strong>.</>
                         : <>No special orders for {date}.</>}
@@ -572,10 +646,10 @@ export default function SpecialOrders() {
 
                   {filtered.length > 0 && (
                     <tr className="totals-row">
-                      <td colSpan={3}>Total</td>
+                      <td colSpan={5}>Total</td>
                       <td className="total-cell">{totalUnits}</td>
                       <td className="total-cell">${totalRev.toFixed(2)}</td>
-                      <td colSpan={4}></td>
+                      <td colSpan={5}></td>
                     </tr>
                   )}
                 </tbody>
