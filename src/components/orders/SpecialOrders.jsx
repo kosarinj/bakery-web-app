@@ -508,7 +508,7 @@ export default function SpecialOrders() {
           <table className="data-grid" style={{ width: '100%' }}>
             <thead>
               <tr>
-                <th style={{ minWidth: 200 }}>Product</th>
+                <th style={{ width: 210 }}>Product</th>
                 <th style={{ width: 90, textAlign: 'right' }}>Qty</th>
                 <th style={{ width: 90, textAlign: 'right' }}>Price</th>
                 <th style={{ minWidth: 180 }}>Notes</th>
@@ -520,7 +520,7 @@ export default function SpecialOrders() {
                 <tr key={i}>
                   <td>
                     <select value={l.prod_name} onChange={e => setLine(i, 'prod_name', e.target.value)}
-                      style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
+                      style={{ width: 200, maxWidth: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
                       <option value="">— product —</option>
                       {productOptions()}
                     </select>
