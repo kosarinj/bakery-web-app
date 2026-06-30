@@ -304,12 +304,16 @@ export default function SpecialOrders() {
     const money = n => '$' + (Number(n) || 0).toFixed(2)
     if (!items || items.length === 0) { setError('Nothing to print.'); return }
 
-    // Group by Location — each location prints on its own sheet.
+    // Group by Customer — each customer prints on their own sheet listing all of
+    // their products. Fall back to Location as the key only when a row has no
+    // customer name, so unnamed orders still print sensibly.
     const groups = []; const map = new Map()
     items.forEach(o => {
-      const key = o.location || ''
+      const cust = (o.cust_name || '').trim()
+      const key = cust ? `cust:${cust}` : `loc:${o.location || ''}`
       let g = map.get(key)
-      if (!g) { g = { cust_name: o.cust_name || '', location: o.location || '', rows: [] }; map.set(key, g); groups.push(g) }
+      if (!g) { g = { cust_name: cust, locations: new Set(), rows: [] }; map.set(key, g); groups.push(g) }
+      if (o.location) g.locations.add(o.location)
       g.rows.push(o)
     })
     const [y, m, d] = date.split('-')
@@ -326,7 +330,7 @@ export default function SpecialOrders() {
         <h1>${esc(title)}</h1>
         <div class="meta"><span class="lbl">Order Date:</span> ${dateStr}</div>
         ${g.cust_name ? `<div class="meta"><span class="lbl">Customer:</span> ${esc(g.cust_name)}</div>` : ''}
-        <div class="meta loc"><span class="lbl">Location:</span> <span class="locval">${esc(g.location)}</span></div>
+        ${[...g.locations].filter(Boolean).length ? `<div class="meta loc"><span class="lbl">Location:</span> <span class="locval">${esc([...g.locations].join(', '))}</span></div>` : ''}
         <table>
           <thead><tr><th class="qty">Qty</th><th>Product Name</th><th class="num">Price</th><th class="notes">Notes</th><th class="num">Subtotal</th></tr></thead>
           <tbody>${rows}</tbody>
