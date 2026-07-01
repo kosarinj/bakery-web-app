@@ -234,9 +234,10 @@ export default function SpecialOrders() {
         created.push(enrich(d))
       }
       setOrders(prev => [...prev, ...created])
-      // Stay on the Add panel and keep the market (Location) + date so she can keep
-      // entering orders for the same market; clear the per-order fields + product lines.
-      setBulkCust(''); setBulkDel(''); setBulkPhone('')
+      // Stay on the Add panel and keep the market (Location) + delivery date so she can
+      // keep entering orders for the same market/date; clear only the customer-specific
+      // fields (customer, phone) and the product lines for the next order.
+      setBulkCust(''); setBulkPhone('')
       setBulkLines([emptyLine(), emptyLine(), emptyLine()])
       setSavedMsg(`Added ${created.length} order${created.length !== 1 ? 's' : ''} for ${bulkLoc}. Enter the next one, or click Done.`)
       setTimeout(() => setSavedMsg(''), 6000)
