@@ -134,6 +134,7 @@ export default function SpecialOrders() {
   const [bulkPhone, setBulkPhone] = useState('')
   const [bulkLines, setBulkLines] = useState([emptyLine()])
   const [saving, setSaving]       = useState(false)
+  const [savedMsg, setSavedMsg]   = useState('')
   const [dates, setDates]       = useState([])
   const [showCal, setShowCal]   = useState(false)
   const [bakeryName, setBakeryName] = useState('')
@@ -207,7 +208,7 @@ export default function SpecialOrders() {
 
   function openBulkAdd() {
     setBulkLoc(''); setBulkCust(''); setBulkDel(''); setBulkPhone(''); setBulkLines([emptyLine(), emptyLine(), emptyLine()])
-    setError(''); setAdding(true)
+    setError(''); setSavedMsg(''); setAdding(true)
   }
   function setLine(i, field, value) { setBulkLines(ls => ls.map((l, idx) => idx === i ? { ...l, [field]: value } : l)) }
   function addLine() { setBulkLines(ls => [...ls, emptyLine()]) }
@@ -233,7 +234,12 @@ export default function SpecialOrders() {
         created.push(enrich(d))
       }
       setOrders(prev => [...prev, ...created])
-      setAdding(false)
+      // Stay on the Add panel and keep the market (Location) + date so she can keep
+      // entering orders for the same market; clear the per-order fields + product lines.
+      setBulkCust(''); setBulkDel(''); setBulkPhone('')
+      setBulkLines([emptyLine(), emptyLine(), emptyLine()])
+      setSavedMsg(`Added ${created.length} order${created.length !== 1 ? 's' : ''} for ${bulkLoc}. Enter the next one, or click Done.`)
+      setTimeout(() => setSavedMsg(''), 6000)
     } catch (e) { setError(`Add failed: ${e.message}`) }
     finally { setSaving(false) }
   }
@@ -553,11 +559,12 @@ export default function SpecialOrders() {
 
           <div style={{ marginTop: 10, display: 'flex', gap: 8, alignItems: 'center' }}>
             <button className="btn btn-secondary btn-sm" onClick={addLine}>+ Add product line</button>
+            {savedMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>✓ {savedMsg}</span>}
             <div style={{ flex: 1 }} />
             <button className="btn btn-primary" onClick={submitBulk} disabled={saving || bulkReady.length === 0 || !bulkLoc.trim()}>
               {saving ? 'Adding…' : `Add All (${bulkReady.length})`}
             </button>
-            <button className="btn btn-secondary" onClick={() => setAdding(false)} disabled={saving}>Cancel</button>
+            <button className="btn btn-secondary" onClick={() => setAdding(false)} disabled={saving}>Done</button>
           </div>
         </div>
       )}
