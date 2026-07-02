@@ -79,9 +79,10 @@ export default function AccountsList() {
 
   const fmtDate = v => v ? new Date(v).toLocaleDateString() : ''
   const q = search.toLowerCase()
-  const visibleAccounts = q
+  const visibleAccounts = (q
     ? accounts.filter(a => (a.name||'').toLowerCase().includes(q) || (a.acctgrp||'').toLowerCase().includes(q) || (a.route||'').toLowerCase().includes(q))
     : accounts
+  ).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')) // alphabetical by name
 
   return (
     <div>
