@@ -296,7 +296,8 @@ export default function OrdersGrid() {
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
     if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
     if (hideEmptyRows) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
-    return a
+    // Sort markets alphabetically by name (copy so we never mutate the accounts state)
+    return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
   }, [accounts, filterAccount, repeatAccounts, hideEmptyRows, visibleProducts, orderMap])
 
   // Totals
