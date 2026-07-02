@@ -5,7 +5,7 @@ const CATEGORIES = ['wholesale', 'retail', 'farmers_market', 'other']
 
 const EMPTY_NEW = {
   name: '', route: '', sequence: 0, category: 'wholesale',
-  acctgrp: '', region: '', prefix: '', notes: ''
+  acctgrp: '', order_group: '', region: '', prefix: '', notes: ''
 }
 
 const TABS = [
@@ -120,6 +120,7 @@ export default function AccountsList() {
                 <tr>
                   <th style={{ minWidth: 150 }}>Account Name</th>
                   <th style={{ minWidth: 90 }}>Group</th>
+                  <th style={{ minWidth: 100 }} title="Group several stores (e.g. Adams) to aggregate their orders on the Orders screen">Order Group</th>
                   <th style={{ minWidth: 100 }}>Subcategory</th>
                   <th style={{ minWidth: 110 }}>Category</th>
                   <th style={{ minWidth: 80 }}>Route</th>
@@ -135,6 +136,7 @@ export default function AccountsList() {
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.acctgrp||''} onSave={v=>save(a.name,'acctgrp',v)} type="text" align="left"/></td>
+                    <td><EditableCell value={a.order_group||''} onSave={v=>save(a.name,'order_group',v)} type="text" align="left"/></td>
                     <td><EditableCell value={a.subcategory||''} onSave={v=>save(a.name,'subcategory',v)} type="text" align="left"/></td>
                     <td>
                       <select value={a.category||'wholesale'} onChange={e=>save(a.name,'category',e.target.value)}
@@ -164,6 +166,9 @@ export default function AccountsList() {
                     <td><input type="text" placeholder="Group" value={newAcct.acctgrp}
                       style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
                       onChange={e=>setNewAcct(p=>({...p,acctgrp:e.target.value}))}/></td>
+                    <td><input type="text" placeholder="Order group" value={newAcct.order_group||''}
+                      style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
+                      onChange={e=>setNewAcct(p=>({...p,order_group:e.target.value}))}/></td>
                     <td colSpan={2}>
                       <select value={newAcct.category} onChange={e=>setNewAcct(p=>({...p,category:e.target.value}))}
                         style={{border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}>
@@ -185,7 +190,7 @@ export default function AccountsList() {
                       onChange={e=>setNewAcct(p=>({...p,notes:e.target.value}))}/></td>
                   </tr>
                 )}
-                {accounts.length===0&&!adding&&<tr><td colSpan={10} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No accounts yet.</td></tr>}
+                {accounts.length===0&&!adding&&<tr><td colSpan={11} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No accounts yet.</td></tr>}
               </tbody>
             </table>
           )}

@@ -71,6 +71,10 @@ async function initDB() {
   // is_extra flag on products — marks products that belong to the "extras" category
   await pool.query(`ALTER TABLE products ADD COLUMN IF NOT EXISTS is_extra BOOLEAN DEFAULT FALSE`)
 
+  // order_group on accounts — optional label to group several stores (e.g. "Adams")
+  // so their orders can be aggregated into one on the Orders screen.
+  await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS order_group TEXT`)
+
   // checked flag on spec_orders — per-order checkbox (defaults checked); replaces destructive delete
   await pool.query(`ALTER TABLE spec_orders ADD COLUMN IF NOT EXISTS checked BOOLEAN DEFAULT TRUE`)
 

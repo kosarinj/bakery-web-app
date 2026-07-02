@@ -300,63 +300,101 @@ export default function OrdersGrid() {
     return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
   }, [accounts, filterAccount, repeatAccounts, hideEmptyRows, visibleProducts, orderMap])
 
+  // ── Market grouping: aggregate several stores (e.g. "Adams") into one order ──
+  const [groupMarkets, setGroupMarkets] = useState(() => localStorage.getItem('orders_groupMarkets') === '1')
+  const toggleGroupMarkets = () => setGroupMarkets(v => { const n = !v; localStorage.setItem('orders_groupMarkets', n ? '1' : '0'); return n })
+  const hasGroups = useMemo(() => accounts.some(a => (a.order_group || '').trim()), [accounts])
+
+  const groupMembers = useMemo(() => {
+    const m = {}
+    if (!groupMarkets) return m
+    accounts.forEach(a => { const g = (a.order_group || '').trim(); if (g) (m[g] = m[g] || []).push(a) })
+    return m
+  }, [accounts, groupMarkets])
+
+  // Accounts as displayed: grouped members collapse into one pseudo-account per group.
+  const displayAccounts = useMemo(() => {
+    if (!groupMarkets) return visibleAccounts
+    const out = [], seen = new Set()
+    visibleAccounts.forEach(a => {
+      const g = (a.order_group || '').trim()
+      if (g && groupMembers[g]) {
+        if (!seen.has(g)) { seen.add(g); out.push({ name: g, isGroup: true, memberCount: groupMembers[g].length }) }
+      } else out.push(a)
+    })
+    return out
+  }, [groupMarkets, visibleAccounts, groupMembers])
+
+  // orderMap accessor that sums a group's members (units + weighted-avg wprice).
+  const entryAt = useCallback((acctName, prod) => {
+    if (groupMarkets && groupMembers[acctName]) {
+      let u = 0, uw = 0
+      groupMembers[acctName].forEach(a => {
+        const e = orderMap[`${a.name}|${prod}`]
+        if (e) { u += e.units || 0; uw += (e.units || 0) * (e.wprice || 0) }
+      })
+      return u > 0 ? { units: u, wprice: uw / u } : null
+    }
+    return orderMap[`${acctName}|${prod}`]
+  }, [groupMarkets, groupMembers, orderMap])
+
   // Totals
   const rowTotal = useCallback((key1) =>
-    (flipped ? visibleAccounts : visibleProducts).reduce((s, key2) => {
+    (flipped ? displayAccounts : visibleProducts).reduce((s, key2) => {
       const [acct, prod] = flipped ? [key2.name, key1.prod_name] : [key1.name, key2.prod_name]
-      return s + (orderMap[`${acct}|${prod}`]?.units || 0)
+      return s + (entryAt(acct, prod)?.units || 0)
     }, 0)
-  , [flipped, visibleAccounts, visibleProducts, orderMap])
+  , [flipped, displayAccounts, visibleProducts, entryAt])
 
   const colTotal = useCallback((key2) =>
-    (flipped ? visibleProducts : visibleAccounts).reduce((s, key1) => {
+    (flipped ? visibleProducts : displayAccounts).reduce((s, key1) => {
       const [acct, prod] = flipped ? [key2.name, key1.prod_name] : [key1.name, key2.prod_name]
-      return s + (orderMap[`${acct}|${prod}`]?.units || 0)
+      return s + (entryAt(acct, prod)?.units || 0)
     }, 0)
-  , [flipped, visibleAccounts, visibleProducts, orderMap])
+  , [flipped, displayAccounts, visibleProducts, entryAt])
 
   const grandTotal = useMemo(() =>
-    visibleAccounts.reduce((s, a) =>
-      s + visibleProducts.reduce((ss, p) => ss + (orderMap[`${a.name}|${p.prod_name}`]?.units || 0), 0)
+    displayAccounts.reduce((s, a) =>
+      s + visibleProducts.reduce((ss, p) => ss + (entryAt(a.name, p.prod_name)?.units || 0), 0)
     , 0)
-  , [visibleAccounts, visibleProducts, orderMap])
+  , [displayAccounts, visibleProducts, entryAt])
 
   // Dollar total per column (units × wprice) — used when flipped=true
   const colDollarTotal = useCallback((col) => {
     return visibleProducts.reduce((s, p) => {
-      const entry = orderMap[`${col.name}|${p.prod_name}`]
+      const entry = entryAt(col.name, p.prod_name)
       return s + (entry?.units || 0) * (entry?.wprice || 0)
     }, 0)
-  }, [visibleProducts, orderMap])
+  }, [visibleProducts, entryAt])
 
   // Dollar total per row — used when flipped=false (row = account)
   const rowDollarTotal = useCallback((r) => {
     return visibleProducts.reduce((s, p) => {
-      const entry = orderMap[`${r.name}|${p.prod_name}`]
+      const entry = entryAt(r.name, p.prod_name)
       return s + (entry?.units || 0) * (entry?.wprice || 0)
     }, 0)
-  }, [visibleProducts, orderMap])
+  }, [visibleProducts, entryAt])
 
   const grandDollarTotal = useMemo(() =>
-    visibleAccounts.reduce((s, a) =>
+    displayAccounts.reduce((s, a) =>
       s + visibleProducts.reduce((ss, p) => {
-        const e = orderMap[`${a.name}|${p.prod_name}`]
+        const e = entryAt(a.name, p.prod_name)
         return ss + (e?.units || 0) * (e?.wprice || 0)
       }, 0)
     , 0)
-  , [visibleAccounts, visibleProducts, orderMap])
+  , [displayAccounts, visibleProducts, entryAt])
 
   if (loading) return <div className="loading">Loading orders...</div>
 
-  const rows    = flipped ? visibleProducts : visibleAccounts
-  const cols    = flipped ? visibleAccounts : visibleProducts
+  const rows    = flipped ? visibleProducts : displayAccounts
+  const cols    = flipped ? displayAccounts : visibleProducts
   const rowKey  = r => flipped ? r.prod_name : r.name
   const colKey  = c => flipped ? c.name : c.prod_name
   const rowLabel = r => flipped ? r.prod_name : r.name
   const colLabel = c => flipped ? c.name : c.prod_name
   const cellVal  = (r, c) => {
     const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
-    return orderMap[`${acct}|${prod}`]?.units ?? 0
+    return entryAt(acct, prod)?.units ?? 0
   }
   const onSave = (r, c) => v => {
     const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
@@ -405,6 +443,13 @@ export default function OrdersGrid() {
           onClick={() => setFlipped(v => !v)} title="Swap rows and columns">
           ⇄ Flip
         </button>
+        {hasGroups && (
+          <button className={`btn btn-sm ${groupMarkets ? 'btn-primary' : 'btn-secondary'}`}
+            onClick={toggleGroupMarkets}
+            title="Combine grouped stores (Order Group on the Accounts screen, e.g. Adams) into one aggregated, read-only order">
+            {groupMarkets ? '▣' : '▢'} Group markets
+          </button>
+        )}
         <label style={{ gap: 6, fontWeight: extrasOnly ? 700 : 400, color: extrasOnly ? 'var(--primary)' : 'inherit' }}>
           <input type="checkbox" checked={extrasOnly} onChange={e => setExtrasOnly(e.target.checked)} />
           Extras
@@ -616,20 +661,25 @@ export default function OrdersGrid() {
                 </tr>
               </>}
               {rows.map(r => {
-                const rt = (flipped ? visibleAccounts : visibleProducts).reduce((s, c) => {
+                const rt = (flipped ? displayAccounts : visibleProducts).reduce((s, c) => {
                   const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
-                  return s + (orderMap[`${acct}|${prod}`]?.units || 0)
+                  return s + (entryAt(acct, prod)?.units || 0)
                 }, 0)
+                const rowIsGroup = !flipped && r.isGroup
                 return (
                   <tr key={rowKey(r)}>
                     <td className="sticky-col acct-name">
                       <div>
                         {rowLabel(r)}
+                        {rowIsGroup && (
+                          <span title={`Aggregated group of ${r.memberCount} store(s) — read-only; turn off "Group markets" to edit individual stores`}
+                            style={{ marginLeft: 5, fontSize: 10, fontWeight: 700, color: 'var(--primary)' }}>▣ {r.memberCount}</span>
+                        )}
                         {flipped && r.is_extra && (
                           <span title="Extra product" style={{ marginLeft: 5, fontSize: 10, fontWeight: 700, color: '#d97706', opacity: 0.8 }}>E</span>
                         )}
                       </div>
-                      {!flipped && (
+                      {!flipped && !rowIsGroup && (
                         <input type="date" value={delDateMap[r.name] || ''}
                           onChange={e => saveDelDate(r.name, e.target.value)}
                           title="Delivery date"
@@ -638,9 +688,12 @@ export default function OrdersGrid() {
                     </td>
                     {cols.map(c => {
                       const val = cellVal(r, c)
+                      const cellIsGroup = flipped ? c.isGroup : r.isGroup
                       return (
                         <td key={colKey(c)} className={`order-cell${val > 0 ? ' order-cell-filled' : ''}`}>
-                          <EditableCell value={val} onSave={onSave(r, c)} type="number" align="right" />
+                          {cellIsGroup
+                            ? <span style={{ display: 'block', textAlign: 'right', padding: '0 4px', fontWeight: 600, color: val > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{val || ''}</span>
+                            : <EditableCell value={val} onSave={onSave(r, c)} type="number" align="right" />}
                         </td>
                       )
                     })}

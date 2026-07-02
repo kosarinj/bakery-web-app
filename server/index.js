@@ -230,12 +230,12 @@ app.get('/api/accounts', requireAuth, async (req, res) => {
 })
 
 app.post('/api/accounts', requireAuth, async (req, res) => {
-  const { name, route, sequence, category, acctgrp, marketfee, prefix, postord, notes } = req.body
+  const { name, route, sequence, category, acctgrp, order_group, marketfee, prefix, postord, notes } = req.body
   try {
     const { rows } = await query(
-      `INSERT INTO accounts(name,route,sequence,category,acctgrp,marketfee,prefix,postord,notes)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9) RETURNING *`,
-      [name, route, sequence||0, category||'wholesale', acctgrp, marketfee||0, prefix, postord||false, notes]
+      `INSERT INTO accounts(name,route,sequence,category,acctgrp,order_group,marketfee,prefix,postord,notes)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) RETURNING *`,
+      [name, route, sequence||0, category||'wholesale', acctgrp, order_group||null, marketfee||0, prefix, postord||false, notes]
     )
     res.json(rows[0])
   } catch (e) {
@@ -248,7 +248,7 @@ app.patch('/api/accounts/:name', requireAuth, async (req, res) => {
     'route','sequence','category','acctgrp','balance','marketfee','prefix','postord','active','notes',
     'acct_id','subcategory','open_dt','manager','owner','address','city','state','phone','fax','email',
     'del_inst','entire_inv','wrap_muffins','print_inv','next_del','gas','tolls',
-    'region','day_of_week','webname','sendweb','webstart','webend','adj_level'
+    'region','day_of_week','webname','sendweb','webstart','webend','adj_level','order_group'
   ]
   const updates = []
   const vals = []
