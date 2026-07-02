@@ -616,6 +616,7 @@ export default function SpecialOrders() {
                       </>)
                     })()}
                     <th style={{ width: 40, textAlign: 'center' }} title="Checked">✓</th>
+                    <th style={{ width: 36, textAlign: 'center' }} title="Delete this order">✕</th>
                     <th style={{ width: 40, textAlign: 'center' }} title="Print this single order">🖨</th>
                   </tr>
                 </thead>
@@ -643,6 +644,11 @@ export default function SpecialOrders() {
                           style={{ width: 16, height: 16, cursor: 'pointer' }} />
                       </td>
                       <td style={{ textAlign: 'center' }}>
+                        <button type="button" onClick={() => del(o.id)}
+                          title="Delete this order"
+                          style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '2px 4px', color: '#ef4444', fontWeight: 700 }}>✕</button>
+                      </td>
+                      <td style={{ textAlign: 'center' }}>
                         <button type="button" onClick={() => printOne(o)}
                           title={`Print this order${o.location ? ` for ${o.location}` : ''} on its own sheet`}
                           style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 15, lineHeight: 1, padding: '2px 4px' }}>🖨</button>
@@ -652,7 +658,7 @@ export default function SpecialOrders() {
 
 
                   {filtered.length === 0 && !adding && (
-                    <tr><td colSpan={12} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
+                    <tr><td colSpan={13} style={{ textAlign: 'center', color: 'var(--text-muted)', padding: 32 }}>
                       {copyLocation
                         ? <>No special orders for {date} at location <strong>{copyLocation}</strong>.</>
                         : <>No special orders for {date}.</>}
@@ -665,7 +671,7 @@ export default function SpecialOrders() {
                       <td colSpan={5}>Total</td>
                       <td className="total-cell">{totalUnits}</td>
                       <td className="total-cell">${totalRev.toFixed(2)}</td>
-                      <td colSpan={5}></td>
+                      <td colSpan={6}></td>
                     </tr>
                   )}
                 </tbody>
