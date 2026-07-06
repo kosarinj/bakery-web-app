@@ -3,6 +3,21 @@ import EditableCell from '../shared/EditableCell'
 
 const EMPTY_NEW = { ingredient: '', sequence: 0, qty: 0, teaspoons: 0, tablespoons: 0, cups: 0, pounds: 0, rectext: '' }
 
+function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
+function trim(n) { const v = parseFloat(n); return v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '') }
+
+// Scale one recipe row by `scale` and return its printable ingredient parts (matches RecipeGenerator).
+function scaledParts(row, scale) {
+  const parts = []
+  const lbs = num(row.pounds) * scale, cups = num(row.cups) * scale, tbsp = num(row.tablespoons) * scale, tsp = num(row.teaspoons) * scale, qty = num(row.qty) * scale
+  if (lbs)  parts.push(`${trim(lbs)} lbs.`)
+  if (cups) parts.push(`${trim(cups)} cup(s)`)
+  if (tbsp) parts.push(`${trim(tbsp)} tbsp`)
+  if (tsp)  parts.push(`${trim(tsp)} tsp`)
+  if (qty)  parts.push(`${trim(qty)} ${row.ingr_unit || row.ingredient_unit || ''}`.trim())
+  return parts
+}
+
 export default function RecipeGrid() {
   const [products, setProducts] = useState([])
   const [ingredients, setIngredients] = useState([])
@@ -13,14 +28,18 @@ export default function RecipeGrid() {
   const [error, setError] = useState('')
   const [newRow, setNewRow] = useState(EMPTY_NEW)
   const [adding, setAdding] = useState(false)
+  const [scaleQty, setScaleQty] = useState('')   // quantity of the product to scale the recipe for
+  const [bakeryName, setBakeryName] = useState('')
 
   useEffect(() => {
     Promise.all([
       fetch('/api/products', { credentials: 'include' }).then(r => r.json()),
       fetch('/api/ingredients', { credentials: 'include' }).then(r => r.json()),
-    ]).then(([prods, ings]) => {
+      fetch('/api/settings', { credentials: 'include' }).then(r => r.json()).catch(() => ({})),
+    ]).then(([prods, ings, settings]) => {
       setProducts(prods)
       setIngredients(ings)
+      setBakeryName(settings?.bakery_name || '')
       if (prods.length) setSelectedProduct(prods[0].prod_name)
     })
   }, [])
@@ -84,6 +103,56 @@ export default function RecipeGrid() {
     i => !rows.find(r => r.ingredient === i.name)
   )
 
+  // Scale-for-quantity: enter a number of the product, get batches the same way the
+  // recipe generator does (ceil(units / multiplier)), then scale every ingredient by it.
+  const selProd = products.find(p => p.prod_name === selectedProduct)
+  const multiplier = num(selProd?.multiplier) || 1
+  const qtyNum = num(scaleQty)
+  const batches = qtyNum > 0 ? (multiplier > 0 ? Math.ceil(qtyNum / multiplier) : qtyNum) : 0
+  const showScaled = qtyNum > 0 && rows.length > 0
+
+  // Print the scaled recipe — mirrors RecipeGenerator's doPrint output for a single card.
+  function printScaled() {
+    if (!showScaled) return
+    const esc = s => String(s ?? '').replace(/[&<>]/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;' }[c]))
+    const line = (row) => {
+      if (row.space) return '<div class="sp"></div>'
+      if (row.rectext && !row.ingredient) return `<div class="sec">${esc(row.rectext)}</div>`
+      return `<div class="ing"><span class="nm">${esc(row.ingredient)}:</span> ${scaledParts(row, batches).map(esc).join('  ')}</div>`
+    }
+    const body = rows.map(line).join('')
+    const title = (bakeryName ? `${bakeryName} ` : '') + 'Recipe'
+    const today = new Date().toISOString().slice(0, 10)
+    const html = `<!doctype html><html><head><meta charset="utf-8"><title>${esc(title)} ${esc(selectedProduct)}</title><style>
+      *{box-sizing:border-box}
+      body{font-family:Arial,Helvetica,sans-serif;color:#000;margin:0;padding:.4in}
+      h1{font-family:"Book Antiqua","Palatino Linotype",Georgia,serif;font-size:22px;margin:0 0 4px}
+      .date{font-size:12px;color:#444;margin-bottom:14px}
+      .recipe{page-break-inside:avoid;margin:0 0 18px;padding-bottom:10px;border-bottom:1px solid #bbb}
+      .recipe h2{font-size:16px;margin:0 0 6px}
+      .recipe h2 .meta{font-weight:400;font-size:12px;color:#555}
+      .ing{font-size:13px;margin:2px 0;padding-left:8px}
+      .ing .nm{font-weight:700;display:inline-block;min-width:120px}
+      .sec{font-size:13px;font-weight:700;font-style:italic;margin:8px 0 2px;color:#222}
+      .sp{height:7px}
+      @page{margin:.5in}
+    </style></head><body>
+      <h1>${esc(title)}</h1>
+      <div class="date">${esc(today)}</div>
+      <div class="recipe">
+        <h2>${esc(selectedProduct)} <span class="meta">— ${trim(qtyNum)} units · ${trim(batches)} batch${batches !== 1 ? 'es' : ''}</span></h2>
+        ${body || '<div class="ing">No recipe.</div>'}
+      </div>
+    </body></html>`
+    const iframe = document.createElement('iframe')
+    iframe.style.cssText = 'position:fixed;right:0;bottom:0;width:0;height:0;border:0'
+    document.body.appendChild(iframe)
+    const doc = iframe.contentWindow.document
+    doc.open(); doc.write(html); doc.close()
+    iframe.contentWindow.focus()
+    setTimeout(() => { iframe.contentWindow.print(); setTimeout(() => document.body.removeChild(iframe), 1500) }, 300)
+  }
+
   return (
     <div className="recipe-layout">
       <div className="recipe-sidebar">
@@ -111,6 +180,21 @@ export default function RecipeGrid() {
         <div className="page-toolbar">
           <strong style={{ fontSize: 15, color: 'var(--primary)' }}>{selectedProduct}</strong>
           <div className="toolbar-spacer" />
+          <label style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 12, color: 'var(--text-muted)' }}
+            title="Enter a quantity of this product to scale the recipe, then print">
+            Qty:
+            <input type="number" step="any" min="0" value={scaleQty}
+              onChange={e => setScaleQty(e.target.value)} placeholder="0"
+              style={{ width: 64, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '2px 5px', fontSize: 13, fontWeight: 700, textAlign: 'right' }} />
+          </label>
+          {showScaled && (
+            <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+              → <strong style={{ color: 'var(--primary)' }}>{trim(batches)}</strong> batch{batches !== 1 ? 'es' : ''}
+              {multiplier !== 1 && <span style={{ opacity: 0.7 }}> (×{trim(multiplier)}/batch)</span>}
+            </span>
+          )}
+          <button className="btn btn-secondary btn-sm" onClick={printScaled} disabled={!showScaled}
+            title="Print this recipe scaled to the entered quantity">🖨 Print</button>
           {!adding && (
             <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}
               disabled={!selectedProduct || availableIngredients.length === 0}>
@@ -220,6 +304,30 @@ export default function RecipeGrid() {
                 )}
               </tbody>
             </table>
+          </div>
+        )}
+
+        {!loading && showScaled && (
+          <div style={{ marginTop: 16, border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '12px 16px', background: 'var(--cell-edit-bg)' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 8 }}>
+              <strong style={{ fontSize: 14, color: 'var(--primary)' }}>Scaled recipe</strong>
+              <span style={{ fontSize: 12, color: 'var(--text-muted)' }}>
+                {trim(qtyNum)} {selectedProduct} → {trim(batches)} batch{batches !== 1 ? 'es' : ''}
+              </span>
+              <div className="toolbar-spacer" />
+              <button className="btn btn-secondary btn-sm" onClick={printScaled} title="Print this scaled recipe">🖨 Print</button>
+            </div>
+            {rows.map(row => {
+              if (row.space) return <div key={row.id} style={{ height: 8 }} />
+              if (row.rectext && !row.ingredient) return <div key={row.id} style={{ fontWeight: 700, fontStyle: 'italic', margin: '8px 0 2px' }}>{row.rectext}</div>
+              const parts = scaledParts(row, batches)
+              return (
+                <div key={row.id} style={{ fontSize: 13, margin: '2px 0', paddingLeft: 8 }}>
+                  <span style={{ fontWeight: 700, display: 'inline-block', minWidth: 140 }}>{row.ingredient}:</span>
+                  {parts.join('   ')}
+                </div>
+              )
+            })}
           </div>
         )}
       </div>
