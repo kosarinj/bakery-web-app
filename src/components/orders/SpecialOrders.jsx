@@ -144,6 +144,7 @@ export default function SpecialOrders() {
   const [copyFrom, setCopyFrom]       = useState('')
   const [copyTo, setCopyTo]           = useState('')
   const [copyLocation, setCopyLocation] = useState('')
+  const [copyCheckedOnly, setCopyCheckedOnly] = useState(true)
   const [copying, setCopying]         = useState(false)
   const [copyMsg, setCopyMsg]         = useState('')
 
@@ -291,7 +292,7 @@ export default function SpecialOrders() {
     try {
       const r = await fetch('/api/spec-orders/copy', {
         method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, ...(copyLocation ? { location: copyLocation } : {}) })
+        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, checked_only: copyCheckedOnly, ...(copyLocation ? { location: copyLocation } : {}) })
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d.error)
@@ -463,6 +464,12 @@ export default function SpecialOrders() {
             </select>
           </label>
         )}
+        <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}
+          title="Only repeat orders that are still checked — unchecked (marked-off) orders are skipped">
+          <input type="checkbox" checked={copyCheckedOnly} onChange={e => setCopyCheckedOnly(e.target.checked)}
+            style={{ width: 15, height: 15, cursor: 'pointer' }} />
+          Checked only
+        </label>
         <button className="btn btn-secondary btn-sm" onClick={repeatOrders}
           disabled={copying || !copyFrom || !copyTo || copyFrom === copyTo}>
           {copying ? 'Copying…' : '⬇ Repeat Special Orders'}

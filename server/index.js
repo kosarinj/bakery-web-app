@@ -961,7 +961,7 @@ app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
 
 // Copy special orders from one date to another (skip if order already exists for that account+product+date)
 app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
-  const { from_date, to_date, accounts, location } = req.body
+  const { from_date, to_date, accounts, location, checked_only } = req.body
   if (!from_date || !to_date) return res.status(400).json({ error: 'from_date and to_date required' })
   const hasAcctFilter = Array.isArray(accounts) && accounts.length > 0
   const hasLocFilter  = !!location
@@ -969,6 +969,9 @@ app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
   let extraWhere = ''
   if (hasLocFilter)  { params.push(location);  extraWhere += ` AND s.location = $${params.length}` }
   if (hasAcctFilter) { params.push(accounts);  extraWhere += ` AND s.account = ANY($${params.length}::text[])` }
+  // Only repeat orders that are still checked (unchecked = marked off, so skip them).
+  // NULL/absent is treated as checked, matching the client's `checked !== false`.
+  if (checked_only !== false) extraWhere += ` AND s.checked IS NOT FALSE`
   try {
     const { rows } = await query(`
       INSERT INTO spec_orders(account,cust_name,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
