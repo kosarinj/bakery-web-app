@@ -58,6 +58,15 @@ export default function AccountsList() {
     } catch (e) { setError(`Save failed: ${e.message}`) }
   }
 
+  async function deleteAccount(name) {
+    if (!confirm(`Delete account "${name}"? This can't be undone. (Accounts with existing orders can't be deleted — mark them Inactive instead.)`)) return
+    try {
+      const r = await fetch(`/api/accounts/${encodeURIComponent(name)}`, { method: 'DELETE', credentials: 'include' })
+      if (!r.ok) { const d = await r.json().catch(() => ({})); throw new Error(d.error || 'Delete failed') }
+      setAccounts(prev => prev.filter(a => a.name !== name))
+    } catch (e) { setError(e.message) }
+  }
+
   async function addAccount() {
     if (!newAcct.name.trim()) return
     try {
@@ -130,6 +139,7 @@ export default function AccountsList() {
                   <th style={{ minWidth: 100 }}>Day of Week</th>
                   <th style={{ minWidth: 70, textAlign: 'center' }}>Active</th>
                   <th style={{ minWidth: 200 }}>Notes</th>
+                  <th style={{ width: 40 }}></th>
                 </tr>
               </thead>
               <tbody>
@@ -156,6 +166,10 @@ export default function AccountsList() {
                       </span>
                     </td>
                     <td><EditableCell value={a.notes||''} onSave={v=>save(a.name,'notes',v)} type="text" align="left"/></td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button type="button" onClick={() => deleteAccount(a.name)} title={`Delete ${a.name}`}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '2px 4px', color: '#ef4444', fontWeight: 700 }}>✕</button>
+                    </td>
                   </tr>
                 ))}
                 {adding && (
@@ -189,9 +203,10 @@ export default function AccountsList() {
                     <td><input type="text" placeholder="Notes" value={newAcct.notes}
                       style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
                       onChange={e=>setNewAcct(p=>({...p,notes:e.target.value}))}/></td>
+                    <td />
                   </tr>
                 )}
-                {accounts.length===0&&!adding&&<tr><td colSpan={11} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No accounts yet.</td></tr>}
+                {accounts.length===0&&!adding&&<tr><td colSpan={12} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No accounts yet.</td></tr>}
               </tbody>
             </table>
           )}

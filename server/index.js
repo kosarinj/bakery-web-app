@@ -259,6 +259,18 @@ app.patch('/api/accounts/:name', requireAuth, async (req, res) => {
   res.json({ success: true })
 })
 
+app.delete('/api/accounts/:name', requireAuth, async (req, res) => {
+  try {
+    const r = await query('DELETE FROM accounts WHERE name=$1 RETURNING name', [req.params.name])
+    if (r.rowCount === 0) return res.status(404).json({ error: 'Account not found' })
+    res.json({ success: true })
+  } catch (e) {
+    // Foreign-key violation: the account still has orders/history referencing it.
+    if (e.code === '23503') return res.status(409).json({ error: 'This account has orders or history, so it can\'t be deleted. Toggle it to Inactive instead.' })
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Inventory ─────────────────────────────────────────────────────────────
 
 app.get('/api/inventory', requireAuth, async (req, res) => {
