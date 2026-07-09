@@ -337,10 +337,25 @@ export default function SpecialOrders() {
     const logoSrc = /^https?:\/\//i.test(rawLogo) ? rawLogo : (window.location.origin + rawLogo)
 
     const fmtDate = (ds) => { const [yy, mm, dd] = ds.split('-'); return `${mm}/${dd}/${yy}` }
+    // Delivery date = the order's del_date when set (a manual override); otherwise the order/
+    // baking date plus the account's "postord" day offset (+1, +2, …). Falls back to the order date.
+    const addDays = (ds, n) => { const dt = new Date(ds + 'T00:00:00'); dt.setDate(dt.getDate() + (n || 0)); return dt.toISOString().slice(0, 10) }
+    const offsetFor = (loc) => {
+      const a = accounts.find(x => (x.name || '').trim().toLowerCase() === String(loc || '').trim().toLowerCase())
+      if (!a) return null
+      const v = a.postord
+      if (v === true) return 1
+      if (v === false || v == null || v === '') return 0
+      const n = parseInt(v); return isNaN(n) ? 0 : n
+    }
+    const rowDelivery = (o) => {
+      if (o.del_date) return String(o.del_date).slice(0, 10)
+      const off = offsetFor(o.location || o.account)
+      return off != null ? addDays(date, off) : date
+    }
     const sheets = groups.map(g => {
       const total = g.rows.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
-      // Delivery date(s) for this customer's order — falls back to the order date if none set.
-      const delDates = [...new Set(g.rows.map(o => o.del_date ? String(o.del_date).slice(0, 10) : '').filter(Boolean))]
+      const delDates = [...new Set(g.rows.map(rowDelivery).filter(Boolean))]
       const delStr = delDates.length ? delDates.map(fmtDate).join(', ') : dateStr
       const rows = g.rows.map(o => {
         const u = parseFloat(o.units) || 0, p = parseFloat(o.price) || 0
@@ -507,8 +522,9 @@ export default function SpecialOrders() {
               <input type="text" value={bulkCust} placeholder="Customer name" onChange={e => setBulkCust(e.target.value)}
                 style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 160 }} />
             </label>
-            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}>
-              Delivery date
+            <label style={{ display: 'flex', flexDirection: 'column', fontSize: 12, color: 'var(--text-muted)' }}
+              title="Leave blank to use the account's postord offset (order date + N). Only set this to override the delivery date.">
+              Delivery date <span style={{ opacity: 0.7 }}>(override)</span>
               <input type="date" value={bulkDel} onChange={e => setBulkDel(e.target.value)}
                 style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13 }} />
             </label>
