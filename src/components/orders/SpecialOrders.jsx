@@ -365,8 +365,8 @@ export default function SpecialOrders() {
       .sheet{padding:.5in;page-break-after:always}
       .sheet:last-child{page-break-after:auto}
       h1{font-family:"Book Antiqua","Palatino Linotype",Georgia,serif;font-size:24px;font-weight:700;margin:0 0 14px}
-      .sheet-head{margin:0 0 14px}
-      .logo{max-height:96px;max-width:75%;object-fit:contain;display:block}
+      .sheet-head{margin:0 0 14px;text-align:center}
+      .logo{max-height:96px;max-width:75%;object-fit:contain;display:block;margin:0 auto}
       .meta{font-size:13px;margin:2px 0}
       .meta .lbl{display:inline-block;width:95px;font-weight:700;vertical-align:middle}
       .loc{margin:6px 0}
