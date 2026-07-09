@@ -138,6 +138,7 @@ export default function SpecialOrders() {
   const [dates, setDates]       = useState([])
   const [showCal, setShowCal]   = useState(false)
   const [bakeryName, setBakeryName] = useState('')
+  const [logoUrl, setLogoUrl]   = useState(() => localStorage.getItem('bakery-logo_url') || '')
   const [locFont, setLocFont]   = useState(() => parseInt(localStorage.getItem('specord_locFont')) || 32)
 
   // Copy/repeat state
@@ -157,6 +158,7 @@ export default function SpecialOrders() {
         setCopyFrom(prev.toISOString().slice(0, 10))
         setCopyTo(d)
         setBakeryName(s.bakery_name || '')
+        if (s.logo_url !== undefined) setLogoUrl(s.logo_url || '')
       }).catch(() => setDate(new Date().toISOString().slice(0, 10)))
 
     Promise.all([
@@ -329,16 +331,24 @@ export default function SpecialOrders() {
     const [y, m, d] = date.split('-')
     const dateStr = `${m}/${d}/${y}`
     const title = (bakeryName ? `${bakeryName}: ` : '') + 'Special Order'
+    // Logo for the sheet header (custom logo_url, else the bundled /logo.jpg). Use an
+    // absolute URL so it resolves inside the print iframe; it's already cached from the app header.
+    const rawLogo = logoUrl || '/logo.jpg'
+    const logoSrc = /^https?:\/\//i.test(rawLogo) ? rawLogo : (window.location.origin + rawLogo)
 
+    const fmtDate = (ds) => { const [yy, mm, dd] = ds.split('-'); return `${mm}/${dd}/${yy}` }
     const sheets = groups.map(g => {
       const total = g.rows.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
+      // Delivery date(s) for this customer's order — falls back to the order date if none set.
+      const delDates = [...new Set(g.rows.map(o => o.del_date ? String(o.del_date).slice(0, 10) : '').filter(Boolean))]
+      const delStr = delDates.length ? delDates.map(fmtDate).join(', ') : dateStr
       const rows = g.rows.map(o => {
         const u = parseFloat(o.units) || 0, p = parseFloat(o.price) || 0
         return `<tr><td class="qty">${u}</td><td>${esc(o.prod_name)}</td><td class="num">${p > 0 ? money(p) : ''}</td><td class="notes">${esc(o.notes)}</td><td class="num">${money(u * p)}</td></tr>`
       }).join('')
       return `<div class="sheet">
-        <h1>${esc(title)}</h1>
-        <div class="meta"><span class="lbl">Order Date:</span> ${dateStr}</div>
+        <div class="sheet-head"><img class="logo" src="${esc(logoSrc)}" alt="${esc(title)}" onerror="this.outerHTML='<h1>'+this.alt+'</h1>'" /></div>
+        <div class="meta"><span class="lbl">Delivery Date:</span> ${delStr}</div>
         ${g.cust_name ? `<div class="meta"><span class="lbl">Customer:</span> ${esc(g.cust_name)}</div>` : ''}
         ${[...g.locations].filter(Boolean).length ? `<div class="meta loc"><span class="lbl">Location:</span> <span class="locval">${esc([...g.locations].join(', '))}</span></div>` : ''}
         <table>
@@ -355,6 +365,8 @@ export default function SpecialOrders() {
       .sheet{padding:.5in;page-break-after:always}
       .sheet:last-child{page-break-after:auto}
       h1{font-family:"Book Antiqua","Palatino Linotype",Georgia,serif;font-size:24px;font-weight:700;margin:0 0 14px}
+      .sheet-head{margin:0 0 14px}
+      .logo{max-height:96px;max-width:75%;object-fit:contain;display:block}
       .meta{font-size:13px;margin:2px 0}
       .meta .lbl{display:inline-block;width:95px;font-weight:700;vertical-align:middle}
       .loc{margin:6px 0}
