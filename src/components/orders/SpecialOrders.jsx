@@ -250,10 +250,17 @@ export default function SpecialOrders() {
 
   // Product <option>s grouped by type, for the bulk product selects.
   // Honors the add-panel Type / Category filters so the picker can be narrowed.
-  function productOptions() {
+  // `selectedName` is the line's currently-chosen product — always keep it in the list even
+  // if the current filter would exclude it, so changing the filter for a NEW line doesn't blank
+  // out the product already picked on an earlier line.
+  function productOptions(selectedName) {
     let list = products
     if (addFilterType)  list = list.filter(p => (p.prod_type || '') === addFilterType)
     if (addFilterGroup) list = list.filter(p => (p.prod_group || '') === addFilterGroup)
+    if (selectedName && !list.some(p => p.prod_name === selectedName)) {
+      const sel = products.find(p => p.prod_name === selectedName)
+      if (sel) list = [sel, ...list]
+    }
     const types = [...new Set(list.map(p => p.prod_type).filter(Boolean))].sort()
     if (types.length === 0) return list.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
     return (
@@ -570,7 +577,7 @@ export default function SpecialOrders() {
                     <select value={l.prod_name} onChange={e => setLine(i, 'prod_name', e.target.value)}
                       style={{ width: 200, maxWidth: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
                       <option value="">— product —</option>
-                      {productOptions()}
+                      {productOptions(l.prod_name)}
                     </select>
                   </td>
                   <td>
