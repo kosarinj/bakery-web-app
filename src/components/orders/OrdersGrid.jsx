@@ -112,6 +112,7 @@ export default function OrdersGrid() {
   const [repeatAccounts, setRepeatAccounts] = useState(null) // null = all
   const [repeatPercents, setRepeatPercents] = useState({}) // account → percent of last week (default 100)
   const [clearAccount, setClearAccount] = useState('')
+  const [acctBoxSearch, setAcctBoxSearch] = useState('') // search within the Filter Accounts box
 
   const orderMapRef = useRef({})
 
@@ -526,7 +527,7 @@ export default function OrdersGrid() {
           <select value={clearAccount} onChange={e => setClearAccount(e.target.value)}
             style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13, background: 'var(--surface)' }}>
             <option value="">— clear account… —</option>
-            {accounts.map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+            {[...accounts].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
           </select>
         </label>
         <button className="btn btn-danger btn-sm" onClick={clearAccountOrders} disabled={!clearAccount}
@@ -563,11 +564,17 @@ export default function OrdersGrid() {
               Clear filter
             </button>
           </div>
+          <input type="text" placeholder="🔍 search accounts…" value={acctBoxSearch}
+            onChange={e => setAcctBoxSearch(e.target.value)}
+            style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, marginBottom: 8 }} />
           <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
             Set each checked account's repeat amount as a % of last week (default 100%). e.g. Tucker Square 100, Abingdon 80.
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
-            {accounts.map(a => (
+            {[...accounts]
+              .filter(a => !acctBoxSearch || (a.name || '').toLowerCase().includes(acctBoxSearch.toLowerCase()))
+              .sort((a, b) => (a.name || '').localeCompare(b.name || ''))
+              .map(a => (
               <label key={a.name} style={{ display: 'flex', alignItems: 'center', gap: 5, fontSize: 13, cursor: 'pointer', minWidth: 210 }}>
                 <input type="checkbox"
                   checked={repeatAccounts.has(a.name)}
