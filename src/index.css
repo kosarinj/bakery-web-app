@@ -364,7 +364,10 @@ body {
 table.data-grid {
   border-collapse: collapse;
   white-space: nowrap;
-  min-width: 100%;
+  /* Size to content instead of forcing full width — so when only one account (or product)
+     is shown, columns keep their natural width instead of stretching super wide. Wider-
+     than-container grids still scroll via .grid-scroll-container. */
+  width: max-content;
 }
 
 table.data-grid thead th {
