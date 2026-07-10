@@ -2,7 +2,6 @@ import { useState, useEffect, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 
 const EMPTY_NEW = { prod_name: '', prod_type: '', prod_group: '', subtype: '', multiplier: 1, divisor: 1, batch: false, is_extra: false, notes: '' }
-const MAX_ROWS = 100
 
 const TABS = [
   { key: 'basic',  label: 'Basic' },
@@ -75,7 +74,7 @@ export default function ProductsList() {
         (p.prod_name||'').toLowerCase().includes(q) ||
         (p.prod_type||'').toLowerCase().includes(q) ||
         (p.prod_group||'').toLowerCase().includes(q))
-    : safeProducts.slice(0, MAX_ROWS)
+    : safeProducts
 
   const totalShown = filtered.length
   const groups = filtered.reduce((acc, p) => {
@@ -103,7 +102,7 @@ export default function ProductsList() {
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 200 }}
         />
         <span className="toolbar-info">
-          {search ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total — showing first ${MAX_ROWS}`}
+          {search ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total`}
         </span>
         <label style={{ gap: 6 }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
