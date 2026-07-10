@@ -72,8 +72,8 @@ export default function Dashboard() {
   const [byType, setByType]         = useState({ date: null, data: [] })
   const [topAccounts, setTopAccts]  = useState([])
   const [revHistory, setRevHistory] = useState([])
-  const [revView, setRevView]       = useState('monthly') // 'monthly' | 'yearly'
-  const [revYears, setRevYears]     = useState(5)
+  const [revView, setRevView]       = useState('yearly') // 'monthly' | 'yearly'
+  const [revYears, setRevYears]     = useState(20)
   const [yoy, setYoy]               = useState(null)
   const navigate = useNavigate()
 
