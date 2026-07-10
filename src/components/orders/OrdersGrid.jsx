@@ -283,23 +283,31 @@ export default function OrdersGrid() {
     [...new Set(products.map(p => p.prod_type).filter(Boolean))].sort()
   , [products])
 
+  // "Focused" on specific account(s): the user searched for an account, or narrowed the
+  // Filter Accounts box to fewer than all accounts. When focused we DON'T hide empty rows/
+  // columns, so a brand-new / order-less account (e.g. "Rough Draft") shows up with every
+  // product column — ready to type quantities into and create a new order.
+  const accountFocused = !!filterAccount ||
+    (repeatAccounts !== null && repeatAccounts.size > 0 &&
+      repeatAccounts.size < (Array.isArray(accounts) ? accounts.length : 0))
+
   const visibleProducts = useMemo(() => {
     let p = Array.isArray(products) ? products : []
     if (extrasOnly) p = p.filter(x => x.is_extra)
     if (filterProductType) p = p.filter(x => x.prod_type === filterProductType)
     if (filterProduct) p = p.filter(x => (x.prod_name||'').toLowerCase().includes(filterProduct.toLowerCase()))
-    if (hideEmptyCols) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
+    if (hideEmptyCols && !accountFocused) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
     return p
-  }, [products, extrasOnly, filterProductType, filterProduct, hideEmptyCols, accounts, orderMap])
+  }, [products, extrasOnly, filterProductType, filterProduct, hideEmptyCols, accountFocused, accounts, orderMap])
 
   const visibleAccounts = useMemo(() => {
     let a = Array.isArray(accounts) ? accounts : []
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
     if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
-    if (hideEmptyRows) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
+    if (hideEmptyRows && !accountFocused) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
     // Sort markets alphabetically by name (copy so we never mutate the accounts state)
     return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
-  }, [accounts, filterAccount, repeatAccounts, hideEmptyRows, visibleProducts, orderMap])
+  }, [accounts, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, visibleProducts, orderMap])
 
   // ── Market grouping: aggregate several stores (e.g. "Adams") into one order ──
   const [groupMarkets, setGroupMarkets] = useState(() => localStorage.getItem('orders_groupMarkets') === '1')
