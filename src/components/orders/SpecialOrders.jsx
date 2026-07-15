@@ -289,6 +289,41 @@ export default function SpecialOrders() {
     } catch (e) { setError(e.message) }
   }
 
+  // Change an existing order's product — also refreshes the Type/Category shown for the row.
+  async function changeProduct(id, prodName) {
+    const p = products.find(pp => pp.prod_name === prodName)
+    try {
+      await fetch(`/api/spec-orders/${id}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ prod_name: prodName })
+      })
+      setOrders(prev => prev.map(o => o.id === id
+        ? { ...o, prod_name: prodName, prod_type: p?.prod_type ?? '', prod_group: p?.prod_group ?? '' }
+        : o))
+    } catch (e) { setError(e.message) }
+  }
+
+  // All products grouped by Type, for editing an existing row's product (no add-panel filters).
+  function allProductOptions() {
+    const list = products
+    const types = [...new Set(list.map(p => p.prod_type).filter(Boolean))].sort()
+    if (types.length === 0) return list.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
+    return (
+      <>
+        {types.map(t => (
+          <optgroup key={t} label={t}>
+            {list.filter(p => p.prod_type === t).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+          </optgroup>
+        ))}
+        {list.some(p => !p.prod_type) && (
+          <optgroup label="Other">
+            {list.filter(p => !p.prod_type).map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)}
+          </optgroup>
+        )}
+      </>
+    )
+  }
+
   async function del(id) {
     if (!confirm('Delete this special order?')) return
     await fetch(`/api/spec-orders/${id}`, { method: 'DELETE', credentials: 'include' })
@@ -669,7 +704,16 @@ export default function SpecialOrders() {
                     <tr key={o.id} style={o.checked === false ? { opacity: 0.45 } : undefined}>
                       <td><EditableCell value={o.location||''} onSave={v=>save(o.id,'location',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
-                      <td style={{ fontWeight: 500 }}>{o.prod_name}</td>
+                      <td>
+                        <select value={o.prod_name} onChange={e => changeProduct(o.id, e.target.value)}
+                          title="Change this order's product"
+                          style={{ width: '100%', maxWidth: 200, fontWeight: 500, fontSize: 13, border: '1px solid transparent', borderRadius: 'var(--radius-sm)', padding: '2px 4px', background: 'transparent', cursor: 'pointer' }}
+                          onMouseEnter={e => e.currentTarget.style.border = '1px solid var(--border)'}
+                          onMouseLeave={e => e.currentTarget.style.border = '1px solid transparent'}>
+                          {!products.some(p => p.prod_name === o.prod_name) && <option value={o.prod_name}>{o.prod_name}</option>}
+                          {allProductOptions()}
+                        </select>
+                      </td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{o.prod_type || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{o.prod_group || '—'}</td>
                       <td><EditableCell value={parseFloat(o.units)||0} onSave={v=>save(o.id,'units',v)} type="number" align="right" /></td>
