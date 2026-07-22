@@ -356,20 +356,6 @@ export default function SpecialOrders() {
     const money = n => '$' + (Number(n) || 0).toFixed(2)
     if (!items || items.length === 0) { setError('Nothing to print.'); return }
 
-    // Group by Customer + Location — each customer at a given market prints on their
-    // own sheet. Including the Location in the key means two different customers who
-    // share a name (in different markets) never cross onto the same sheet. Falls back
-    // to Location only when a row has no customer name.
-    const groups = []; const map = new Map()
-    items.forEach(o => {
-      const cust = (o.cust_name || '').trim()
-      const loc = (o.location || '').trim()
-      const key = cust ? `cust:${cust}||loc:${loc}` : `loc:${loc}`
-      let g = map.get(key)
-      if (!g) { g = { cust_name: cust, locations: new Set(), rows: [] }; map.set(key, g); groups.push(g) }
-      if (o.location) g.locations.add(o.location)
-      g.rows.push(o)
-    })
     const [y, m, d] = date.split('-')
     const dateStr = `${m}/${d}/${y}`
     const title = (bakeryName ? `${bakeryName}: ` : '') + 'Special Order'
@@ -395,6 +381,26 @@ export default function SpecialOrders() {
       const off = offsetFor(o.location || o.account)
       return off != null ? addDays(date, off) : date
     }
+
+    // Group by Customer + Location + Delivery Date — each customer at a given market,
+    // for a given delivery date, prints on their own sheet. Including the delivery date
+    // in the key means a customer with two orders due on different days (e.g. City Hall
+    // for Daney) prints as two separate sheets instead of one sheet listing both dates.
+    // Including the Location keeps two different customers who share a name (in different
+    // markets) from crossing onto the same sheet. Falls back to Location only when a row
+    // has no customer name.
+    const groups = []; const map = new Map()
+    items.forEach(o => {
+      const cust = (o.cust_name || '').trim()
+      const loc = (o.location || '').trim()
+      const del = rowDelivery(o)
+      const key = (cust ? `cust:${cust}||loc:${loc}` : `loc:${loc}`) + `||del:${del}`
+      let g = map.get(key)
+      if (!g) { g = { cust_name: cust, locations: new Set(), rows: [] }; map.set(key, g); groups.push(g) }
+      if (o.location) g.locations.add(o.location)
+      g.rows.push(o)
+    })
+
     const sheets = groups.map(g => {
       const total = g.rows.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
       const delDates = [...new Set(g.rows.map(rowDelivery).filter(Boolean))]
