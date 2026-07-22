@@ -1,6 +1,7 @@
 import { useState, useEffect, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
+import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
 const EMPTY = { account: '', cust_name: '', location: '', prod_name: '', units: 0, price: 0, del_date: '', phone: '', notes: '' }
 
@@ -152,14 +153,14 @@ export default function SpecialOrders() {
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' }).then(r => r.json())
       .then(s => {
-        const d = s.baking_date || new Date().toISOString().slice(0, 10)
+        const d = effectiveBakingDate(s.baking_date)
         setDate(d)
         const prev = new Date(d + 'T00:00:00'); prev.setDate(prev.getDate() - 7)
         setCopyFrom(prev.toISOString().slice(0, 10))
         setCopyTo(d)
         setBakeryName(s.bakery_name || '')
         if (s.logo_url !== undefined) setLogoUrl(s.logo_url || '')
-      }).catch(() => setDate(new Date().toISOString().slice(0, 10)))
+      }).catch(() => setDate(todayStr()))
 
     Promise.all([
       fetch('/api/accounts', { credentials: 'include' }).then(r => r.json()),

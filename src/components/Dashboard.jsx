@@ -4,6 +4,7 @@ import {
   LineChart, Line, BarChart, Bar, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
+import { effectiveBakingDate } from '../lib/bakingDate'
 
 const MODULES = [
   { to: '/orders',    icon: '📋', label: 'Orders',        desc: 'Enter and review daily orders' },
@@ -87,8 +88,8 @@ export default function Dashboard() {
     ]).then(([cfg, tr, ta, yoyData]) => {
       if (cfg) setSettings(cfg)
 
-      const bakingDate = cfg?.baking_date || null
-      const dateParam  = bakingDate ? `?date=${bakingDate}` : ''
+      const bakingDate = effectiveBakingDate(cfg?.baking_date)
+      const dateParam  = `?date=${bakingDate}`
 
       // Re-fetch baking-date-sensitive endpoints now that we have the date
       Promise.all([
@@ -140,7 +141,7 @@ export default function Dashboard() {
   const revData = revView === 'yearly' ? revYearly : revMonthly
 
   const bakingDate = settings.baking_date
-    ? new Date(settings.baking_date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
+    ? new Date(effectiveBakingDate(settings.baking_date) + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' })
     : ''
 
   return (

@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
 function trim(n) { const v = parseFloat(n); return v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '') }
@@ -139,8 +140,8 @@ export default function RecipeGenerator() {
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
-      .then(s => { setDate(s.baking_date || new Date().toISOString().slice(0, 10)); setBakeryName(s.bakery_name || '') })
-      .catch(() => setDate(new Date().toISOString().slice(0, 10)))
+      .then(s => { setDate(effectiveBakingDate(s.baking_date)); setBakeryName(s.bakery_name || '') })
+      .catch(() => setDate(todayStr()))
   }, [])
 
   async function generate() {

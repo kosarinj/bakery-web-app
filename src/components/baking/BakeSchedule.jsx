@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import EditableCell from '../shared/EditableCell'
+import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
 export default function BakeSchedule() {
   const [date, setDate] = useState('')
@@ -13,8 +14,8 @@ export default function BakeSchedule() {
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
-      .then(s => setDate(s.baking_date || new Date().toISOString().slice(0, 10)))
-      .catch(() => setDate(new Date().toISOString().slice(0, 10)))
+      .then(s => setDate(effectiveBakingDate(s.baking_date)))
+      .catch(() => setDate(todayStr()))
   }, [])
 
   useEffect(() => {

@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react'
 import EditableCell from '../shared/EditableCell'
+import { effectiveBakingDate } from '../../lib/bakingDate'
 
 const fmt$ = v => v != null ? `$${parseFloat(v).toFixed(2)}` : '—'
 const fmtDate = d => { if (!d) return '—'; const s = String(d).slice(0,10); return new Date(s + 'T00:00:00').toLocaleDateString() }
@@ -27,7 +28,7 @@ export default function BillingPage() {
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' }).then(r => r.json())
       .then(s => {
-        const d = s.baking_date || new Date().toISOString().slice(0, 10)
+        const d = effectiveBakingDate(s.baking_date)
         setGenDate(d)
         const monthAgo = new Date(d); monthAgo.setDate(monthAgo.getDate() - 30)
         setFrom(monthAgo.toISOString().slice(0, 10))

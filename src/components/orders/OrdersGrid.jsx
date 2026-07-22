@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
+import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
 function prevDay(dateStr) {
   const d = new Date(dateStr + 'T00:00:00')
@@ -121,12 +122,12 @@ export default function OrdersGrid() {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
       .then(s => {
-        const d = s.baking_date || new Date().toISOString().slice(0, 10)
+        const d = effectiveBakingDate(s.baking_date)
         const from = prevDay(d)
         setDate(d); setCopyFrom(from); setCopyTo(addDays(from, 7)); setCalMonth(d.slice(0, 7))
       })
       .catch(() => {
-        const d = new Date().toISOString().slice(0, 10)
+        const d = todayStr()
         const from = prevDay(d)
         setDate(d); setCopyFrom(from); setCopyTo(addDays(from, 7)); setCalMonth(d.slice(0, 7))
       })
