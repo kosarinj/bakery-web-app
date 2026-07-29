@@ -13,6 +13,35 @@ function BoolCell({ value, onChange }) {
   return <input type="checkbox" checked={!!value} onChange={e => onChange(e.target.checked)} style={{ cursor: 'pointer' }} />
 }
 
+const TYPE_INPUT_STYLE = { width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13, fontFamily: 'var(--font)', background: 'var(--surface)', color: 'inherit' }
+
+// Product Type dropdown: pick from existing types, or "＋ New type…" to type a
+// brand-new one (types aren't a fixed list — they're derived from products).
+function TypeSelect({ value, options, onChange }) {
+  const NEW = '__add_new__'
+  const [creating, setCreating] = useState(false)
+  const [draft, setDraft] = useState('')
+  if (creating) {
+    return (
+      <input autoFocus type="text" placeholder="New type…" value={draft}
+        style={TYPE_INPUT_STYLE}
+        onChange={e => setDraft(e.target.value)}
+        onBlur={() => { const v = draft.trim(); if (v) onChange(v); setCreating(false); setDraft('') }}
+        onKeyDown={e => { if (e.key === 'Enter') { e.currentTarget.blur() } if (e.key === 'Escape') { setCreating(false); setDraft('') } }} />
+    )
+  }
+  const known = !value || options.includes(value)
+  return (
+    <select value={value || ''} style={{ ...TYPE_INPUT_STYLE, cursor: 'pointer' }}
+      onChange={e => { const v = e.target.value; if (v === NEW) { setDraft(''); setCreating(true) } else onChange(v) }}>
+      <option value="">— Type —</option>
+      {!known && <option value={value}>{value}</option>}
+      {options.map(t => <option key={t} value={t}>{t}</option>)}
+      <option value={NEW}>＋ New type…</option>
+    </select>
+  )
+}
+
 export default function ProductsList() {
   const [products, setProducts] = useState([])
   const [loading, setLoading] = useState(true)
@@ -75,6 +104,8 @@ export default function ProductsList() {
         (p.prod_type||'').toLowerCase().includes(q) ||
         (p.prod_group||'').toLowerCase().includes(q))
     : safeProducts
+
+  const productTypes = [...new Set(safeProducts.map(p => p.prod_type).filter(Boolean))].sort()
 
   const totalShown = filtered.length
   const groups = filtered.reduce((acc, p) => {
@@ -143,7 +174,7 @@ export default function ProductsList() {
                           {p.prod_name}
                           {p.has_recipe && <span style={{ marginLeft: 6, color: '#16a34a', fontSize: 11, fontWeight: 700 }} title="Has recipe">●</span>}
                         </td>
-                        <td><EditableCell value={p.prod_type||''} onSave={v=>save(p.prod_name,'prod_type',v)} type="text" align="left"/></td>
+                        <td><TypeSelect value={p.prod_type||''} options={productTypes} onChange={v=>save(p.prod_name,'prod_type',v)}/></td>
                         <td><EditableCell value={p.prod_group||''} onSave={v=>save(p.prod_name,'prod_group',v)} type="text" align="left"/></td>
                         <td><EditableCell value={p.subtype||''} onSave={v=>save(p.prod_name,'subtype',v)} type="text" align="left"/></td>
                         <td style={{textAlign:'center'}}><BoolCell value={p.batch} onChange={v=>save(p.prod_name,'batch',v)}/></td>
@@ -166,9 +197,7 @@ export default function ProductsList() {
                       style={{width:'100%',border:'2px solid var(--primary)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
                       onChange={e=>setNewProd(p=>({...p,prod_name:e.target.value}))}
                       onKeyDown={e=>{if(e.key==='Enter')addProduct();if(e.key==='Escape'){setAdding(false);setNewProd(EMPTY_NEW)}}}/></td>
-                    <td><input type="text" placeholder="Type" value={newProd.prod_type}
-                      style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
-                      onChange={e=>setNewProd(p=>({...p,prod_type:e.target.value}))}/></td>
+                    <td><TypeSelect value={newProd.prod_type} options={productTypes} onChange={v=>setNewProd(p=>({...p,prod_type:v}))}/></td>
                     <td><input type="text" placeholder="Group" value={newProd.prod_group}
                       style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
                       onChange={e=>setNewProd(p=>({...p,prod_group:e.target.value}))}/></td>
