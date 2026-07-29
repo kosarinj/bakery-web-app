@@ -51,6 +51,7 @@ export default function ProductsList() {
   const [showInactive, setShowInactive] = useState(false)
   const [tab, setTab] = useState('basic')
   const [search, setSearch] = useState('')
+  const [filterType, setFilterType] = useState('')
 
   useEffect(() => { load() }, [showInactive])
 
@@ -98,12 +99,14 @@ export default function ProductsList() {
 
   const safeProducts = Array.isArray(products) ? products : []
   const q = search.toLowerCase()
-  const filtered = q
-    ? safeProducts.filter(p =>
-        (p.prod_name||'').toLowerCase().includes(q) ||
-        (p.prod_type||'').toLowerCase().includes(q) ||
-        (p.prod_group||'').toLowerCase().includes(q))
-    : safeProducts
+  const filtered = safeProducts.filter(p => {
+    if (filterType && (p.prod_type || '') !== filterType) return false
+    if (q && !(
+      (p.prod_name||'').toLowerCase().includes(q) ||
+      (p.prod_type||'').toLowerCase().includes(q) ||
+      (p.prod_group||'').toLowerCase().includes(q))) return false
+    return true
+  })
 
   const productTypes = [...new Set(safeProducts.map(p => p.prod_type).filter(Boolean))].sort()
 
@@ -132,8 +135,17 @@ export default function ProductsList() {
           onChange={e => setSearch(e.target.value)}
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 200 }}
         />
+        <select
+          value={filterType}
+          onChange={e => setFilterType(e.target.value)}
+          title="Filter by product type"
+          style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, width: 160, cursor: 'pointer', background: filterType ? 'var(--primary-light)' : 'var(--surface)', color: 'inherit' }}
+        >
+          <option value="">All types</option>
+          {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
+        </select>
         <span className="toolbar-info">
-          {search ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total`}
+          {(search || filterType) ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total`}
         </span>
         <label style={{ gap: 6 }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
