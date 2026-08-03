@@ -500,6 +500,43 @@ export default function SpecialOrders() {
   const totalUnits = filtered.reduce((s, o) => s + (parseFloat(o.units) || 0), 0)
   const totalRev   = filtered.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
 
+  // Export the currently-shown special orders (respects date + sort + filter) to .xlsx.
+  async function exportExcel() {
+    const ExcelJS = (await import('exceljs')).default
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Special Orders')
+    ws.addRow([`Special Orders — ${date || 'all dates'}`])
+    const headers = ['Location', 'Customer', 'Product', 'Type', 'Category', 'Units', 'Price', 'Del Date', 'Phone', 'Notes']
+    const headerRow = ws.addRow(headers)
+    for (const o of sorted) {
+      ws.addRow([
+        o.location || '', o.cust_name || '', o.prod_name || '', o.prod_type || '', o.prod_group || '',
+        parseFloat(o.units) || 0,
+        parseFloat(o.price) > 0 ? parseFloat(o.price) : '',
+        o.del_date ? String(o.del_date).slice(0, 10) : '',
+        o.phone || '', o.notes || ''
+      ])
+    }
+    ws.addRow(['Total', '', '', '', '', totalUnits || 0, totalRev > 0 ? Math.round(totalRev * 100) / 100 : '', '', '', ''])
+    ws.getRow(1).font = { bold: true, size: 14 }
+    headerRow.font = { bold: true, underline: true }
+    ws.columns.forEach((col) => {
+      let max = 8
+      col.eachCell({ includeEmpty: true }, (c) => { const l = c.value == null ? 0 : String(c.value).length; if (l > max) max = l })
+      col.width = Math.min(max + 2, 45)
+    })
+    const buf = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `special-orders-${date || 'all'}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   return (
     <div>
       <div className="page-toolbar" style={{ marginBottom: 8 }}>
@@ -511,6 +548,10 @@ export default function SpecialOrders() {
           </button>
         )}
         <span className="toolbar-info">{filtered.length}{copyLocation ? ` of ${orders.length}` : ''} orders · {totalUnits} units · ${totalRev.toFixed(2)}</span>
+        <button className="btn btn-secondary btn-sm" onClick={exportExcel} disabled={sorted.length === 0}
+          title="Export the shown special orders to Excel">
+          ⬇ Excel
+        </button>
         <div className="toolbar-spacer" />
         <label style={{ fontSize: 12, color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: 4 }}
           title="Font size of the Location name on the printed sheet">

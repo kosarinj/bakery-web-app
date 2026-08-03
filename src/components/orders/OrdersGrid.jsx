@@ -103,6 +103,7 @@ export default function OrdersGrid() {
   const [filterAccount, setFilterAccount] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [extrasOnly, setExtrasOnly] = useState(false)
+  const [marketsOnly, setMarketsOnly] = useState(false)  // accounts with category 'farmers_market'
 
   // Copy / Repeat
   const [copyFrom, setCopyFrom] = useState('')
@@ -303,12 +304,13 @@ export default function OrdersGrid() {
 
   const visibleAccounts = useMemo(() => {
     let a = Array.isArray(accounts) ? accounts : []
+    if (marketsOnly) a = a.filter(x => x.category === 'farmers_market')
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
     if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
     if (hideEmptyRows && !accountFocused) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
     // Sort markets alphabetically by name (copy so we never mutate the accounts state)
     return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
-  }, [accounts, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, visibleProducts, orderMap])
+  }, [accounts, marketsOnly, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, visibleProducts, orderMap])
 
   // ── Market grouping: aggregate several stores (e.g. "Adams") into one order ──
   const [groupMarkets, setGroupMarkets] = useState(() => localStorage.getItem('orders_groupMarkets') === '1')
@@ -519,6 +521,11 @@ export default function OrdersGrid() {
         <label style={{ gap: 6, fontWeight: extrasOnly ? 700 : 400, color: extrasOnly ? 'var(--primary)' : 'inherit' }}>
           <input type="checkbox" checked={extrasOnly} onChange={e => setExtrasOnly(e.target.checked)} />
           Extras
+        </label>
+        <label style={{ gap: 6, fontWeight: marketsOnly ? 700 : 400, color: marketsOnly ? 'var(--primary)' : 'inherit' }}
+          title="Show only farmers-market accounts">
+          <input type="checkbox" checked={marketsOnly} onChange={e => setMarketsOnly(e.target.checked)} />
+          Markets Only
         </label>
         <label style={{ gap: 6 }}>
           Type:
