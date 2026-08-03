@@ -411,6 +411,62 @@ export default function OrdersGrid() {
     saveCell(acct, prod, v, date)
   }
 
+  // Export exactly what's on the grid (respects flip, filters, Extras, grouping)
+  // to a real .xlsx — like the original VB "View Report". ExcelJS is loaded
+  // lazily so it doesn't bloat the initial page load.
+  async function exportExcel() {
+    const ExcelJS = (await import('exceljs')).default
+    const wb = new ExcelJS.Workbook()
+    const ws = wb.addWorksheet('Orders')
+    const corner = flipped ? 'Product' : 'Account'
+    const money = (n) => Math.round(n || 0)
+
+    ws.addRow([`Orders — ${date}`])
+    const header = [corner, ...cols.map(colLabel), 'Total']
+    if (!flipped) header.push('# Items', '$ Total')
+    const headerRow = ws.addRow(header)
+
+    // When products are the columns, the screen shows # Items / $ Total summary rows on top.
+    if (flipped) {
+      ws.addRow(['# Items', ...cols.map(c => colTotal(c) || ''), grandTotal || ''])
+      ws.addRow(['$ Total', ...cols.map(c => colDollarTotal(c) > 0 ? money(colDollarTotal(c)) : ''), grandDollarTotal > 0 ? money(grandDollarTotal) : ''])
+    }
+
+    for (const r of rows) {
+      const rt = rowTotal(r)
+      const line = [rowLabel(r), ...cols.map(c => cellVal(r, c) || ''), rt || '']
+      if (!flipped) line.push(rt || '', rowDollarTotal(r) > 0 ? money(rowDollarTotal(r)) : '')
+      ws.addRow(line)
+    }
+
+    const totalsLine = ['Total', ...cols.map(c => colTotal(c) || ''), grandTotal || '']
+    if (!flipped) totalsLine.push(grandTotal || '', grandDollarTotal > 0 ? money(grandDollarTotal) : '')
+    ws.addRow(totalsLine)
+
+    // Formatting to mirror the VB report: bold title, bold+underlined header.
+    ws.getRow(1).font = { bold: true, size: 14 }
+    headerRow.font = { bold: true, underline: true }
+    ws.columns.forEach((col, i) => {
+      let max = i === 0 ? 14 : 6
+      col.eachCell({ includeEmpty: true }, (cell) => {
+        const len = cell.value == null ? 0 : String(cell.value).length
+        if (len > max) max = len
+      })
+      col.width = Math.min(max + 2, 40)
+    })
+
+    const buf = await wb.xlsx.writeBuffer()
+    const blob = new Blob([buf], { type: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `orders-${date}.xlsx`
+    document.body.appendChild(a)
+    a.click()
+    document.body.removeChild(a)
+    setTimeout(() => URL.revokeObjectURL(url), 1000)
+  }
+
   const dateDisplay = date
     ? new Date(date + 'T00:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric', year: 'numeric' })
     : '—'
@@ -476,6 +532,11 @@ export default function OrdersGrid() {
         <button className={`btn btn-sm ${(filterProduct || filterAccount) ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setShowFilters(v => !v)}>
           🔍{(filterProduct || filterAccount) ? ' ●' : ''}
+        </button>
+
+        <button className="btn btn-secondary btn-sm" onClick={exportExcel}
+          title="Export the current grid to Excel — respects flip, filters, and Extras">
+          ⬇ Excel
         </button>
 
         <span className="toolbar-info">
