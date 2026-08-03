@@ -104,6 +104,7 @@ export default function OrdersGrid() {
   const [showFilters, setShowFilters] = useState(false)
   const [extrasOnly, setExtrasOnly] = useState(false)
   const [marketsOnly, setMarketsOnly] = useState(false)  // accounts with category 'farmers_market'
+  const [exportGroupBy, setExportGroupBy] = useState('')  // '' | 'subtype' | 'prod_type' | 'prod_group' — Excel export row grouping
 
   // Copy / Repeat
   const [copyFrom, setCopyFrom] = useState('')
@@ -434,11 +435,44 @@ export default function OrdersGrid() {
       ws.addRow(['$ Total', ...cols.map(c => colDollarTotal(c) > 0 ? money(colDollarTotal(c)) : ''), grandDollarTotal > 0 ? money(grandDollarTotal) : ''])
     }
 
-    for (const r of rows) {
+    const dataRowFor = (r) => {
       const rt = rowTotal(r)
       const line = [rowLabel(r), ...cols.map(c => cellVal(r, c) || ''), rt || '']
       if (!flipped) line.push(rt || '', rowDollarTotal(r) > 0 ? money(rowDollarTotal(r)) : '')
-      ws.addRow(line)
+      return line
+    }
+
+    // Optional grouping (e.g. group Extras by Sub Type), only when the row objects
+    // actually carry the chosen field (i.e. products are the rows). Otherwise export flat.
+    const gf = (exportGroupBy && rows.length && (exportGroupBy in rows[0])) ? exportGroupBy : ''
+    if (gf) {
+      const ordered = [...rows].sort((a, b) =>
+        String(a[gf] || '').localeCompare(String(b[gf] || '')) || rowLabel(a).localeCompare(rowLabel(b)))
+      let curGroup = null
+      let groupRows = []
+      const flushGroup = () => {
+        if (!groupRows.length) return
+        const sub = ['  Subtotal', ...cols.map(c => groupRows.reduce((s, r) => s + (cellVal(r, c) || 0), 0) || ''), groupRows.reduce((s, r) => s + rowTotal(r), 0) || '']
+        if (!flipped) {
+          sub.push(groupRows.reduce((s, r) => s + rowTotal(r), 0) || '', money(groupRows.reduce((s, r) => s + rowDollarTotal(r), 0)) || '')
+        }
+        const sr = ws.addRow(sub)
+        sr.font = { bold: true, italic: true }
+        groupRows = []
+      }
+      for (const r of ordered) {
+        const gk = String(r[gf] || '').trim() || '(none)'
+        if (gk !== curGroup) {
+          flushGroup()
+          curGroup = gk
+          ws.addRow([gk]).font = { bold: true }
+        }
+        ws.addRow(dataRowFor(r))
+        groupRows.push(r)
+      }
+      flushGroup()
+    } else {
+      for (const r of rows) ws.addRow(dataRowFor(r))
     }
 
     const totalsLine = ['Total', ...cols.map(c => colTotal(c) || ''), grandTotal || '']
@@ -545,6 +579,16 @@ export default function OrdersGrid() {
           title="Export the current grid to Excel — respects flip, filters, and Extras">
           ⬇ Excel
         </button>
+        <label style={{ gap: 4 }} title="Group the Excel export by a product field (with headers + subtotals). Applies when products are the rows.">
+          Group:
+          <select value={exportGroupBy} onChange={e => setExportGroupBy(e.target.value)}
+            style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, background: exportGroupBy ? 'var(--primary-light)' : 'var(--surface)' }}>
+            <option value="">None</option>
+            <option value="subtype">Sub Type</option>
+            <option value="prod_type">Type</option>
+            <option value="prod_group">Category</option>
+          </select>
+        </label>
 
         <span className="toolbar-info">
           {visibleAccounts.length} accts · {visibleProducts.length} prods
