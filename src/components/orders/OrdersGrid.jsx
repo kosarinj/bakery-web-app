@@ -422,61 +422,33 @@ export default function OrdersGrid() {
     const wb = new ExcelJS.Workbook()
     const ws = wb.addWorksheet('Orders')
     const corner = flipped ? 'Product' : 'Account'
-    const money = (n) => Math.round(n || 0)
 
     ws.addRow([`Orders — ${date}`])
     const header = [corner, ...cols.map(colLabel), 'Total']
-    if (!flipped) header.push('# Items', '$ Total')
     const headerRow = ws.addRow(header)
 
-    // When products are the columns, the screen shows # Items / $ Total summary rows on top.
-    if (flipped) {
-      ws.addRow(['# Items', ...cols.map(c => colTotal(c) || ''), grandTotal || ''])
-      ws.addRow(['$ Total', ...cols.map(c => colDollarTotal(c) > 0 ? money(colDollarTotal(c)) : ''), grandDollarTotal > 0 ? money(grandDollarTotal) : ''])
-    }
+    const dataRowFor = (r) => [rowLabel(r), ...cols.map(c => cellVal(r, c) || ''), rowTotal(r) || '']
 
-    const dataRowFor = (r) => {
-      const rt = rowTotal(r)
-      const line = [rowLabel(r), ...cols.map(c => cellVal(r, c) || ''), rt || '']
-      if (!flipped) line.push(rt || '', rowDollarTotal(r) > 0 ? money(rowDollarTotal(r)) : '')
-      return line
-    }
-
-    // Optional grouping (e.g. group Extras by Sub Type), only when the row objects
-    // actually carry the chosen field (i.e. products are the rows). Otherwise export flat.
+    // Optional grouping (e.g. group Extras by Sub Type) — bold group headers, no
+    // subtotals. Only when the row objects carry the chosen field (products as rows).
     const gf = (exportGroupBy && rows.length && (exportGroupBy in rows[0])) ? exportGroupBy : ''
     if (gf) {
       const ordered = [...rows].sort((a, b) =>
         String(a[gf] || '').localeCompare(String(b[gf] || '')) || rowLabel(a).localeCompare(rowLabel(b)))
       let curGroup = null
-      let groupRows = []
-      const flushGroup = () => {
-        if (!groupRows.length) return
-        const sub = ['  Subtotal', ...cols.map(c => groupRows.reduce((s, r) => s + (cellVal(r, c) || 0), 0) || ''), groupRows.reduce((s, r) => s + rowTotal(r), 0) || '']
-        if (!flipped) {
-          sub.push(groupRows.reduce((s, r) => s + rowTotal(r), 0) || '', money(groupRows.reduce((s, r) => s + rowDollarTotal(r), 0)) || '')
-        }
-        const sr = ws.addRow(sub)
-        sr.font = { bold: true, italic: true }
-        groupRows = []
-      }
       for (const r of ordered) {
         const gk = String(r[gf] || '').trim() || '(none)'
         if (gk !== curGroup) {
-          flushGroup()
           curGroup = gk
           ws.addRow([gk]).font = { bold: true }
         }
         ws.addRow(dataRowFor(r))
-        groupRows.push(r)
       }
-      flushGroup()
     } else {
       for (const r of rows) ws.addRow(dataRowFor(r))
     }
 
     const totalsLine = ['Total', ...cols.map(c => colTotal(c) || ''), grandTotal || '']
-    if (!flipped) totalsLine.push(grandTotal || '', grandDollarTotal > 0 ? money(grandDollarTotal) : '')
     ws.addRow(totalsLine)
 
     // Formatting to mirror the VB report: bold title, bold+underlined header.
