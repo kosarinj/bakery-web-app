@@ -114,7 +114,7 @@ export default function AccountsList() {
         </label>
         <div className="toolbar-spacer" />
         {!adding && (
-          <button className="btn btn-primary btn-sm" onClick={() => setAdding(true)}>+ Add Account</button>
+          <button className="btn btn-primary btn-sm" onClick={() => { setTab('basic'); setAdding(true) }}>+ Add Account</button>
         )}
       </div>
 
@@ -143,35 +143,6 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {visibleAccounts.map(a => (
-                  <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
-                    <td style={{ fontWeight: 600 }}>{a.name}</td>
-                    <td><EditableCell value={a.acctgrp||''} onSave={v=>save(a.name,'acctgrp',v)} type="text" align="left"/></td>
-                    <td><EditableCell value={a.order_group||''} onSave={v=>save(a.name,'order_group',v)} type="text" align="left"/></td>
-                    <td><EditableCell value={a.subcategory||''} onSave={v=>save(a.name,'subcategory',v)} type="text" align="left"/></td>
-                    <td>
-                      <select value={a.category||'wholesale'} onChange={e=>save(a.name,'category',e.target.value)}
-                        style={{border:'1px solid var(--border-light)',borderRadius:2,padding:'2px 6px',fontSize:13,background:'transparent'}}>
-                        {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
-                      </select>
-                    </td>
-                    <td><EditableCell value={a.route||''} onSave={v=>save(a.name,'route',v)} type="text" align="left"/></td>
-                    <td><EditableCell value={a.sequence??0} onSave={v=>save(a.name,'sequence',v)} type="number" align="right"/></td>
-                    <td><EditableCell value={a.region||''} onSave={v=>save(a.name,'region',v)} type="text" align="left"/></td>
-                    <td><EditableCell value={a.day_of_week||''} onSave={v=>save(a.name,'day_of_week',v)} type="text" align="left"/></td>
-                    <td style={{textAlign:'center'}}>
-                      <span className={`badge ${a.active?'badge-green':'badge-red'}`} style={{cursor:'pointer'}}
-                        onClick={()=>save(a.name,'active',!a.active)}>
-                        {a.active?'Active':'Inactive'}
-                      </span>
-                    </td>
-                    <td><EditableCell value={a.notes||''} onSave={v=>save(a.name,'notes',v)} type="text" align="left"/></td>
-                    <td style={{ textAlign: 'center' }}>
-                      <button type="button" onClick={() => deleteAccount(a.name)} title={`Delete ${a.name}`}
-                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '2px 4px', color: '#ef4444', fontWeight: 700 }}>✕</button>
-                    </td>
-                  </tr>
-                ))}
                 {adding && (
                   <tr style={{background:'var(--cell-edit-bg)'}}>
                     <td><input autoFocus type="text" placeholder="Account name" value={newAcct.name}
@@ -206,6 +177,35 @@ export default function AccountsList() {
                     <td />
                   </tr>
                 )}
+                {visibleAccounts.map(a => (
+                  <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
+                    <td style={{ fontWeight: 600 }}>{a.name}</td>
+                    <td><EditableCell value={a.acctgrp||''} onSave={v=>save(a.name,'acctgrp',v)} type="text" align="left"/></td>
+                    <td><EditableCell value={a.order_group||''} onSave={v=>save(a.name,'order_group',v)} type="text" align="left"/></td>
+                    <td><EditableCell value={a.subcategory||''} onSave={v=>save(a.name,'subcategory',v)} type="text" align="left"/></td>
+                    <td>
+                      <select value={a.category||'wholesale'} onChange={e=>save(a.name,'category',e.target.value)}
+                        style={{border:'1px solid var(--border-light)',borderRadius:2,padding:'2px 6px',fontSize:13,background:'transparent'}}>
+                        {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                      </select>
+                    </td>
+                    <td><EditableCell value={a.route||''} onSave={v=>save(a.name,'route',v)} type="text" align="left"/></td>
+                    <td><EditableCell value={a.sequence??0} onSave={v=>save(a.name,'sequence',v)} type="number" align="right"/></td>
+                    <td><EditableCell value={a.region||''} onSave={v=>save(a.name,'region',v)} type="text" align="left"/></td>
+                    <td><EditableCell value={a.day_of_week||''} onSave={v=>save(a.name,'day_of_week',v)} type="text" align="left"/></td>
+                    <td style={{textAlign:'center'}}>
+                      <span className={`badge ${a.active?'badge-green':'badge-red'}`} style={{cursor:'pointer'}}
+                        onClick={()=>save(a.name,'active',!a.active)}>
+                        {a.active?'Active':'Inactive'}
+                      </span>
+                    </td>
+                    <td><EditableCell value={a.notes||''} onSave={v=>save(a.name,'notes',v)} type="text" align="left"/></td>
+                    <td style={{ textAlign: 'center' }}>
+                      <button type="button" onClick={() => deleteAccount(a.name)} title={`Delete ${a.name}`}
+                        style={{ border: 'none', background: 'transparent', cursor: 'pointer', fontSize: 14, lineHeight: 1, padding: '2px 4px', color: '#ef4444', fontWeight: 700 }}>✕</button>
+                    </td>
+                  </tr>
+                ))}
                 {accounts.length===0&&!adding&&<tr><td colSpan={12} style={{textAlign:'center',color:'var(--text-muted)',padding:32}}>No accounts yet.</td></tr>}
               </tbody>
             </table>
