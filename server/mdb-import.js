@@ -307,9 +307,12 @@ export async function importInventory(tbl, q) {
 }
 
 export async function importSpecOrders(tbl, q) {
+  // A special order's "customer" is a walk-in person, NOT an account — it goes in
+  // cust_name. The Location (which market/store the order belongs to) is the account.
   const rows = tbl('spec_ord').map(r => ({
     order_num: mordnum(r.order_num),
-    account:   mstr(r.cust),
+    account:   mstr(r.location),
+    cust_name: mstr(r.cust),
     location:  mstr(r.location),
     ordr_dt:   midate(r.ordr_dt),
     prod_name: mstr(r.prod_name),
@@ -317,10 +320,10 @@ export async function importSpecOrders(tbl, q) {
     price:     mnum(r.price)  ?? 0,
     phone:     mstr(r.phone),
     notes:     mstr(r.notes),
-  })).filter(r => r.account && r.prod_name && r.ordr_dt)
+  })).filter(r => (r.account || r.cust_name) && r.prod_name && r.ordr_dt)
 
   // Stubs for missing accounts + products
-  const accts = [...new Set(rows.map(r => r.account))]
+  const accts = [...new Set(rows.map(r => r.account).filter(Boolean))]
   const prods = [...new Set(rows.map(r => r.prod_name))]
   for (let i = 0; i < accts.length; i += 200) {
     const c = accts.slice(i, i+200)
@@ -332,7 +335,7 @@ export async function importSpecOrders(tbl, q) {
     await q(`INSERT INTO inventory(prod_name) SELECT unnest($1::text[]) ON CONFLICT DO NOTHING`, [c])
   }
 
-  const cols = ['order_num','account','location','ordr_dt','prod_name','units','price','phone','notes']
+  const cols = ['order_num','account','cust_name','location','ordr_dt','prod_name','units','price','phone','notes']
   return chunkInsert(rows, 500, async chunk => {
     const vals = chunk.flatMap(r => cols.map(c => r[c]))
     const ph   = chunk.map((_, i) => '(' + cols.map((_, j) => `$${i*cols.length+j+1}`).join(',') + ')').join(',')

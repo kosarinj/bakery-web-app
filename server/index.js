@@ -263,6 +263,53 @@ app.patch('/api/accounts/:name', requireAuth, async (req, res) => {
   res.json({ success: true })
 })
 
+// Bare stub accounts left behind by historical Access imports: no setup data of
+// any kind, and nothing anywhere in the app references them. These are almost
+// entirely special-order customers that the old importer mis-filed as accounts.
+const ORPHAN_STUB_WHERE = `
+  active = false
+  AND route IS NULL
+  AND sequence = 0
+  AND (acctgrp IS NULL OR acctgrp = '')
+  AND balance = 0
+  AND marketfee = 0
+  AND (notes IS NULL OR notes = '')
+  -- never touch a row a human has actually filled in
+  AND (address IS NULL OR address = '')
+  AND (city    IS NULL OR city    = '')
+  AND (phone   IS NULL OR phone   = '')
+  AND (email   IS NULL OR email   = '')
+  AND (manager IS NULL OR manager = '')
+  AND (owner   IS NULL OR owner   = '')
+  AND NOT EXISTS (SELECT 1 FROM daily_orders    WHERE account = accounts.name)
+  AND NOT EXISTS (SELECT 1 FROM track_tix       WHERE account = accounts.name)
+  AND NOT EXISTS (SELECT 1 FROM spec_orders     WHERE account = accounts.name)
+  AND NOT EXISTS (SELECT 1 FROM account_prices  WHERE account = accounts.name)
+  AND NOT EXISTS (SELECT 1 FROM return_items    WHERE account = accounts.name)
+`
+
+// Dry run — how many unused stubs are there, and what do they look like?
+app.get('/api/accounts/orphan-stubs', requireAuth, async (req, res) => {
+  try {
+    const [{ rows: c }, { rows: sample }] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS count FROM accounts WHERE ${ORPHAN_STUB_WHERE}`),
+      query(`SELECT name FROM accounts WHERE ${ORPHAN_STUB_WHERE} ORDER BY name LIMIT 25`),
+    ])
+    res.json({ count: c[0].count, sample: sample.map(r => r.name) })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+app.post('/api/accounts/orphan-stubs/cleanup', requireAuth, async (req, res) => {
+  try {
+    const { rowCount } = await query(`DELETE FROM accounts WHERE ${ORPHAN_STUB_WHERE}`)
+    res.json({ deleted: rowCount })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.delete('/api/accounts/:name', requireAuth, async (req, res) => {
   try {
     const r = await query('DELETE FROM accounts WHERE name=$1 RETURNING name', [req.params.name])
@@ -2131,19 +2178,21 @@ app.post('/api/import/:table', requireAuth, async (req, res) => {
             break
           }
           case 'spec_orders': {
-            const sacc  = col(row,'account') || col(row,'cust')
+            // Location is the account; 'cust' is a walk-in person and belongs in cust_name.
+            const sloc  = col(row,'location') || col(row,'account')
+            const scust = col(row,'cust') || col(row,'cust_name')
             const sprod = col(row,'prod_name')
             const sdate = parseAccessDate(col(row,'ordr_dt'))
-            if (!sacc || !sprod || !sdate) break
+            if ((!sloc && !scust) || !sprod || !sdate) break
             const sonum = col(row,'order_num')
-            await client.query(`INSERT INTO accounts(name,active) VALUES($1,false) ON CONFLICT DO NOTHING`, [sacc])
+            if (sloc) await client.query(`INSERT INTO accounts(name,active) VALUES($1,false) ON CONFLICT DO NOTHING`, [sloc])
             await client.query(`INSERT INTO products(prod_name,active) VALUES($1,true) ON CONFLICT DO NOTHING`, [sprod])
             await client.query(`INSERT INTO inventory(prod_name) VALUES($1) ON CONFLICT DO NOTHING`, [sprod])
             await client.query(`
-              INSERT INTO spec_orders(order_num,account,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
-              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW())
+              INSERT INTO spec_orders(order_num,account,cust_name,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
+              VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW())
               ON CONFLICT DO NOTHING`,
-              [sonum ? parseInt(sonum) : null, sacc, col(row,'location'), sdate,
+              [sonum ? parseInt(sonum) : null, sloc || null, scust || null, sloc || null, sdate,
                parseAccessDate(col(row,'del_date')),
                sprod, num(row,'units'), num(row,'price'),
                col(row,'phone'), col(row,'notes')]

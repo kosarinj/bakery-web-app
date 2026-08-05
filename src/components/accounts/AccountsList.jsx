@@ -3,6 +3,8 @@ import EditableCell from '../shared/EditableCell'
 
 const CATEGORIES = ['wholesale', 'retail', 'farmers_market', 'other']
 
+const PAGE_SIZE = 250
+
 const EMPTY_NEW = {
   name: '', route: '', sequence: 0, category: 'wholesale',
   acctgrp: '', order_group: '', region: '', prefix: '', notes: ''
@@ -32,8 +34,21 @@ export default function AccountsList() {
   const [showInactive, setShowInactive] = useState(false)
   const [tab, setTab] = useState('basic')
   const [search, setSearch] = useState('')
+  const [limit, setLimit] = useState(PAGE_SIZE)
+  const [stubs, setStubs] = useState(null)   // {count, sample} — unused import leftovers
 
   useEffect(() => { load() }, [showInactive])
+  // Only relevant once you're looking at inactive rows, since that's where they hide.
+  useEffect(() => {
+    if (!showInactive) { setStubs(null); return }
+    fetch('/api/accounts/orphan-stubs', { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setStubs(d?.count ? d : null))
+      .catch(() => {})
+  }, [showInactive])
+  // Start each new view at one page — otherwise a big "Show more" carries over
+  // into the next search and stalls the render again.
+  useEffect(() => { setLimit(PAGE_SIZE) }, [showInactive, search, tab])
 
   function load() {
     setLoading(true)
@@ -67,6 +82,24 @@ export default function AccountsList() {
     } catch (e) { setError(e.message) }
   }
 
+  async function cleanupStubs() {
+    const preview = stubs.sample.slice(0, 10).join('\n  ')
+    if (!confirm(
+      `Remove ${stubs.count} unused accounts?\n\n` +
+      `These were created automatically by the old Access import — mostly special-order ` +
+      `customers that were mistakenly filed as accounts. None of them have any setup ` +
+      `details, and nothing in the app refers to them. No orders, tickets or history ` +
+      `will be affected.\n\nFor example:\n  ${preview}\n\nThis can't be undone.`
+    )) return
+    try {
+      const r = await fetch('/api/accounts/orphan-stubs/cleanup', { method: 'POST', credentials: 'include' })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Cleanup failed')
+      setStubs(null)
+      load()
+    } catch (e) { setError(`Cleanup failed: ${e.message}`) }
+  }
+
   async function addAccount() {
     if (!newAcct.name.trim()) return
     try {
@@ -93,6 +126,11 @@ export default function AccountsList() {
     : accounts
   ).slice().sort((a, b) => (a.name || '').localeCompare(b.name || '')) // alphabetical by name
 
+  // Each row is ~13 editable cells, so rendering thousands at once locks up the
+  // browser for minutes. Draw a page at a time; search still spans everything.
+  const shownAccounts = visibleAccounts.slice(0, limit)
+  const hiddenCount = visibleAccounts.length - shownAccounts.length
+
   return (
     <div>
       <div className="page-toolbar">
@@ -112,6 +150,12 @@ export default function AccountsList() {
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show inactive
         </label>
+        {stubs && (
+          <button className="btn btn-secondary btn-sm" onClick={cleanupStubs}
+            title="Accounts auto-created by the old Access import that nothing references">
+            Clean up {stubs.count} unused
+          </button>
+        )}
         <div className="toolbar-spacer" />
         {!adding && (
           <button className="btn btn-primary btn-sm" onClick={() => { setTab('basic'); setAdding(true) }}>+ Add Account</button>
@@ -177,7 +221,7 @@ export default function AccountsList() {
                     <td />
                   </tr>
                 )}
-                {visibleAccounts.map(a => (
+                {shownAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.acctgrp||''} onSave={v=>save(a.name,'acctgrp',v)} type="text" align="left"/></td>
@@ -228,7 +272,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {visibleAccounts.map(a => (
+                {shownAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.address||''} onSave={v=>save(a.name,'address',v)} type="text" align="left"/></td>
@@ -265,7 +309,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {visibleAccounts.map(a => (
+                {shownAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.del_inst||''} onSave={v=>save(a.name,'del_inst',v)} type="text" align="left"/></td>
@@ -305,7 +349,7 @@ export default function AccountsList() {
                 </tr>
               </thead>
               <tbody>
-                {visibleAccounts.map(a => (
+                {shownAccounts.map(a => (
                   <tr key={a.name} style={{ opacity: a.active ? 1 : 0.5 }}>
                     <td style={{ fontWeight: 600 }}>{a.name}</td>
                     <td><EditableCell value={a.webname||''} onSave={v=>save(a.name,'webname',v)} type="text" align="left"/></td>
@@ -322,6 +366,22 @@ export default function AccountsList() {
           )}
 
         </div>
+
+        {hiddenCount > 0 && (
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12,
+                        padding: '10px 12px', borderTop: '1px solid var(--border)', fontSize: 13 }}>
+            <span style={{ color: 'var(--text-muted)' }}>
+              Showing {shownAccounts.length} of {visibleAccounts.length}
+              {search ? ' matching' : ''} accounts
+            </span>
+            <button className="btn btn-secondary btn-sm" onClick={() => setLimit(l => l + PAGE_SIZE)}>
+              Show {Math.min(PAGE_SIZE, hiddenCount)} more
+            </button>
+            <button className="btn btn-secondary btn-sm" onClick={() => setLimit(visibleAccounts.length)}>
+              Show all {visibleAccounts.length}
+            </button>
+          </div>
+        )}
       </div>
     </div>
   )

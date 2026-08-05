@@ -159,6 +159,34 @@ async function initDB() {
   `)
   if (rowCount > 0) console.log(`Marked ${rowCount} stub accounts inactive`)
 
+  // ─── Legacy special orders: customer name was stored in `account` ──────────
+  // Old Access imports put the walk-in customer (spec_ord.cust) into
+  // spec_orders.account, which forced a junk stub row into `accounts` for every
+  // person who ever ordered a cake. The Location is the real account. Move the
+  // person to cust_name and promote location into account.
+  // Self-limiting: once a row is fixed, account = location so it stops matching.
+  // Guarantee the column exists here — index.js adds it too, but that runs
+  // independently and may not have landed yet.
+  await pool.query(`ALTER TABLE spec_orders ADD COLUMN IF NOT EXISTS cust_name text`)
+  const legacySpec = `
+    cust_name IS NULL
+    AND location IS NOT NULL AND btrim(location) <> ''
+    AND account IS DISTINCT FROM btrim(location)
+  `
+  // The account column is FK'd to accounts(name), so the locations must exist first.
+  await pool.query(`
+    INSERT INTO accounts(name, active)
+    SELECT DISTINCT btrim(location), false FROM spec_orders WHERE ${legacySpec}
+    ON CONFLICT DO NOTHING
+  `)
+  const { rowCount: specFixed } = await pool.query(`
+    UPDATE spec_orders
+       SET cust_name = account,
+           account   = btrim(location)
+     WHERE ${legacySpec}
+  `)
+  if (specFixed > 0) console.log(`Moved ${specFixed} legacy special orders onto their Location account`)
+
   console.log('Database ready')
 }
 
