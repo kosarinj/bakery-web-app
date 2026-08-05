@@ -239,6 +239,10 @@ app.post('/api/accounts', requireAuth, async (req, res) => {
     )
     res.json(rows[0])
   } catch (e) {
+    // 23505 = unique_violation → the account name (primary key) already exists.
+    if (e.code === '23505') {
+      return res.status(400).json({ error: `An account named "${name}" already exists. If you don't see it in the list, turn on "Show inactive".` })
+    }
     res.status(400).json({ error: e.message })
   }
 })
