@@ -1023,6 +1023,50 @@ app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
 })
 
 // Copy special orders from one date to another (skip if order already exists for that account+product+date)
+// Special orders whose delivery date falls BEFORE the date the order was taken.
+// That can't happen in real life — it's the signature of a repeat that carried
+// the previous week's delivery date across unchanged. Left alone they print with
+// dates from weeks ago and split a customer's sheet.
+const STALE_DELIVERY_WHERE = `del_date IS NOT NULL AND del_date < ordr_dt`
+
+app.get('/api/spec-orders/stale-delivery', requireAuth, async (req, res) => {
+  const { date, location } = req.query
+  const params = []
+  let where = STALE_DELIVERY_WHERE
+  if (date)     { params.push(date);     where += ` AND ordr_dt = $${params.length}::date` }
+  if (location) { params.push(location); where += ` AND location = $${params.length}` }
+  try {
+    const { rows } = await query(
+      `SELECT id, ordr_dt, del_date, location, cust_name, prod_name
+       FROM spec_orders WHERE ${where} ORDER BY ordr_dt DESC, location, cust_name LIMIT 50`, params)
+    const { rows: c } = await query(`SELECT COUNT(*)::int AS count FROM spec_orders WHERE ${where}`, params)
+    res.json({ count: c[0].count, sample: rows })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Clears the stale date rather than guessing a new one: the original copy span
+// isn't recorded, so it can't be shifted back accurately. Cleared rows fall back
+// to the location's delivery offset, which is what an order with no explicit
+// date is supposed to do.
+app.post('/api/spec-orders/stale-delivery/fix', requireAuth, async (req, res) => {
+  const { date, location } = req.body || {}
+  const params = []
+  let where = STALE_DELIVERY_WHERE
+  if (date)     { params.push(date);     where += ` AND ordr_dt = $${params.length}::date` }
+  if (location) { params.push(location); where += ` AND location = $${params.length}` }
+  try {
+    const { rowCount } = await query(
+      `UPDATE spec_orders SET del_date = NULL, last_update = NOW() WHERE ${where}`, params)
+    await logActivity(req, 'fix_stale_delivery',
+      `Cleared ${rowCount} stale delivery dates${date ? ` for ${date}` : ''}${location ? ` at ${location}` : ''}`)
+    res.json({ cleared: rowCount })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
   const { from_date, to_date, accounts, location, checked_only } = req.body
   if (!from_date || !to_date) return res.status(400).json({ error: 'from_date and to_date required' })
@@ -1038,7 +1082,16 @@ app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
   try {
     const { rows } = await query(`
       INSERT INTO spec_orders(account,cust_name,location,ordr_dt,del_date,prod_name,units,price,phone,notes,last_update)
-      SELECT s.account, s.cust_name, s.location, $2::date, s.del_date, s.prod_name, s.units, s.price, s.phone, s.notes, NOW()
+      -- Shift the delivery date by the same span as the order date. Copying it
+      -- unchanged left every repeated order pointing at the ORIGINAL week's
+      -- delivery, and because each repeat copies the already-stale value, a
+      -- single day ends up showing delivery dates from several past weeks.
+      -- Shifting keeps the relationship the order actually encodes ("delivered
+      -- two days after it's taken"). NULL stays NULL and still falls back to the
+      -- location's offset.
+      SELECT s.account, s.cust_name, s.location, $2::date,
+             s.del_date + ($2::date - $1::date),
+             s.prod_name, s.units, s.price, s.phone, s.notes, NOW()
       FROM spec_orders s
       WHERE s.ordr_dt = $1
         ${extraWhere}

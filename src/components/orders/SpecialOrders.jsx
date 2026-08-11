@@ -177,6 +177,43 @@ export default function SpecialOrders() {
 
   useEffect(() => { if (date) load() }, [date])
 
+  // Orders whose delivery date predates the order date — left behind by repeats
+  // that copied the previous week's delivery across. Checked per day so the
+  // cleanup only offers itself when this date actually has some.
+  const [staleDel, setStaleDel] = useState(null)
+  const checkStaleDelivery = () => {
+    if (!date) return
+    fetch(`/api/spec-orders/stale-delivery?date=${encodeURIComponent(date)}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(d => setStaleDel(d?.count ? d : null))
+      .catch(() => setStaleDel(null))
+  }
+  useEffect(() => { checkStaleDelivery() }, [date])
+
+  async function fixStaleDelivery() {
+    if (!window.confirm(
+      `Clear the delivery date on ${staleDel.count} order${staleDel.count !== 1 ? 's' : ''} for ${date}?
+
+` +
+      `These have a delivery date EARLIER than the day the order was taken, which means a repeat ` +
+      `carried the previous week's date across. Clearing it lets each one fall back to its ` +
+      `location's normal delivery offset.
+
+Orders and quantities are not touched.`
+    )) return
+    try {
+      const r = await fetch('/api/spec-orders/stale-delivery/fix', {
+        method: 'POST', credentials: 'include',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ date })
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Fix failed')
+      setStaleDel(null)
+      load()
+    } catch (e) { setError(`Couldn't clear the dates: ${e.message}`) }
+  }
+
   // Live: refetch (quietly, no loading flash) when another user changes special orders.
   useLiveRefresh('spec-orders', () => { if (date) load(true) })
 
@@ -593,6 +630,13 @@ export default function SpecialOrders() {
           title={copyLocation ? `Print one sheet for ${copyLocation}` : 'Print one sheet per location for all orders this day'}>
           🖨 {copyLocation ? `Print ${copyLocation}` : 'Print Sheets'}
         </button>
+        {staleDel && (
+          <button className="btn btn-secondary btn-sm" onClick={fixStaleDelivery}
+            title={`${staleDel.count} order${staleDel.count !== 1 ? 's' : ''} on this day have a delivery date earlier than the order date — left over from a repeat. Click to clear them.`}
+            style={{ borderColor: 'var(--danger, #ef4444)', color: 'var(--danger, #ef4444)' }}>
+            Fix {staleDel.count} old delivery date{staleDel.count !== 1 ? 's' : ''}
+          </button>
+        )}
         {!adding && <button className="btn btn-primary btn-sm" onClick={openBulkAdd}>+ Add Special Order</button>}
       </div>
 
