@@ -190,17 +190,31 @@ export default function SpecialOrders() {
   }
   useEffect(() => { checkStaleDelivery() }, [date])
 
+  const [undoDel, setUndoDel] = useState(0)
+
   async function fixStaleDelivery() {
-    if (!window.confirm(
-      `Clear the delivery date on ${staleDel.count} order${staleDel.count !== 1 ? 's' : ''} for ${date}?
-
-` +
-      `These have a delivery date EARLIER than the day the order was taken, which means a repeat ` +
-      `carried the previous week's date across. Clearing it lets each one fall back to its ` +
-      `location's normal delivery offset.
-
-Orders and quantities are not touched.`
-    )) return
+    // Show exactly which orders are affected before touching anything — these
+    // are live orders, so "trust me, N rows" isn't good enough.
+    const shown = (staleDel.sample || []).slice(0, 8)
+    const list = shown
+      .map(r => `  - ${r.cust_name || '(no name)'} / ${r.prod_name} / delivery ${String(r.del_date).slice(0, 10)}`)
+      .join('\n')
+    const more = staleDel.count > shown.length ? `\n  ...and ${staleDel.count - shown.length} more` : ''
+    const msg = [
+      `Clear the delivery date on ${staleDel.count} order${staleDel.count !== 1 ? 's' : ''} for ${date}?`,
+      '',
+      'Each of these has a delivery date EARLIER than the day the order was taken,',
+      "which means a repeat carried a previous week's date across.",
+      '',
+      list + more,
+      '',
+      'ONLY the delivery date is cleared. Orders, customers, products, quantities',
+      'and prices are not touched, and nothing is deleted. Cleared dates fall back',
+      "to this location's normal delivery offset.",
+      '',
+      'This can be undone straight afterwards.',
+    ].join('\n')
+    if (!window.confirm(msg)) return
     try {
       const r = await fetch('/api/spec-orders/stale-delivery/fix', {
         method: 'POST', credentials: 'include',
@@ -210,8 +224,20 @@ Orders and quantities are not touched.`
       const d = await r.json()
       if (!r.ok) throw new Error(d.error || 'Fix failed')
       setStaleDel(null)
+      setUndoDel(d.cleared || 0)
       load()
     } catch (e) { setError(`Couldn't clear the dates: ${e.message}`) }
+  }
+
+  async function undoStaleDelivery() {
+    try {
+      const r = await fetch('/api/spec-orders/stale-delivery/undo', { method: 'POST', credentials: 'include' })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error || 'Undo failed')
+      setUndoDel(0)
+      checkStaleDelivery()
+      load()
+    } catch (e) { setError(`Couldn't undo: ${e.message}`) }
   }
 
   // Live: refetch (quietly, no loading flash) when another user changes special orders.
@@ -632,9 +658,15 @@ Orders and quantities are not touched.`
         </button>
         {staleDel && (
           <button className="btn btn-secondary btn-sm" onClick={fixStaleDelivery}
-            title={`${staleDel.count} order${staleDel.count !== 1 ? 's' : ''} on this day have a delivery date earlier than the order date — left over from a repeat. Click to clear them.`}
+            title={`${staleDel.count} order${staleDel.count !== 1 ? 's' : ''} on this day have a delivery date earlier than the order date — left over from a repeat. Clears only the date; shows you the list first and can be undone.`}
             style={{ borderColor: 'var(--danger, #ef4444)', color: 'var(--danger, #ef4444)' }}>
             Fix {staleDel.count} old delivery date{staleDel.count !== 1 ? 's' : ''}
+          </button>
+        )}
+        {undoDel > 0 && (
+          <button className="btn btn-secondary btn-sm" onClick={undoStaleDelivery}
+            title="Put back the delivery dates that were just cleared">
+            Undo ({undoDel})
           </button>
         )}
         {!adding && <button className="btn btn-primary btn-sm" onClick={openBulkAdd}>+ Add Special Order</button>}

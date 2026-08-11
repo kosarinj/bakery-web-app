@@ -1057,11 +1057,54 @@ app.post('/api/spec-orders/stale-delivery/fix', requireAuth, async (req, res) =>
   if (date)     { params.push(date);     where += ` AND ordr_dt = $${params.length}::date` }
   if (location) { params.push(location); where += ` AND location = $${params.length}` }
   try {
+    // Record exactly what is about to change BEFORE changing it. These are live
+    // orders a bakery is working from today, so the operation has to be
+    // reversible — the activity log keeps id + previous date for every row, and
+    // /api/spec-orders/stale-delivery/undo puts them back.
+    const { rows: before } = await query(
+      `SELECT id, to_char(del_date,'YYYY-MM-DD') AS del_date FROM spec_orders WHERE ${where}`, params)
+    if (!before.length) return res.json({ cleared: 0 })
+
     const { rowCount } = await query(
       `UPDATE spec_orders SET del_date = NULL, last_update = NOW() WHERE ${where}`, params)
     await logActivity(req, 'fix_stale_delivery',
-      `Cleared ${rowCount} stale delivery dates${date ? ` for ${date}` : ''}${location ? ` at ${location}` : ''}`)
-    res.json({ cleared: rowCount })
+      JSON.stringify({
+        cleared: rowCount,
+        date: date || null,
+        location: location || null,
+        previous: before,   // [{ id, del_date }] — what an undo restores
+      }))
+    res.json({ cleared: rowCount, undoable: before.length })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+// Put back the delivery dates cleared by the most recent cleanup.
+app.post('/api/spec-orders/stale-delivery/undo', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(
+      `SELECT details FROM activity_log WHERE action = 'fix_stale_delivery'
+       ORDER BY created_at DESC LIMIT 1`)
+    if (!rows.length) return res.status(404).json({ error: 'Nothing to undo — no cleanup has been run.' })
+    let payload
+    try { payload = JSON.parse(rows[0].details) } catch { payload = null }
+    const previous = payload?.previous
+    if (!Array.isArray(previous) || !previous.length) {
+      return res.status(400).json({ error: 'The last cleanup did not record what it changed, so it cannot be undone.' })
+    }
+    let restored = 0
+    for (const r of previous) {
+      if (!r?.id || !r?.del_date) continue
+      // Only restore rows still sitting empty — if someone has since set a date
+      // by hand, that deliberate edit wins over the undo.
+      const { rowCount } = await query(
+        `UPDATE spec_orders SET del_date = $1::date, last_update = NOW()
+         WHERE id = $2 AND del_date IS NULL`, [r.del_date, r.id])
+      restored += rowCount
+    }
+    await logActivity(req, 'undo_stale_delivery', `Restored ${restored} delivery dates`)
+    res.json({ restored, attempted: previous.length })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }
