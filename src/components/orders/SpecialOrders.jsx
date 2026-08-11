@@ -390,12 +390,39 @@ export default function SpecialOrders() {
     // Including the Location keeps two different customers who share a name (in different
     // markets) from crossing onto the same sheet. Falls back to Location only when a row
     // has no customer name.
+    const custLocKey = (o) => {
+      const cust = (o.cust_name || '').trim()
+      const loc = (o.location || '').trim()
+      return cust ? `cust:${cust}||loc:${loc}` : `loc:${loc}`
+    }
+
+    // Adding a product to an existing order leaves the delivery date blank — the
+    // add form has no date filled in, so the row is stored with del_date null and
+    // rowDelivery falls back to a COMPUTED default. The rows it was joining carry
+    // their real date, so the two disagree and the customer splits across two
+    // sheets over a field that was simply left empty.
+    //
+    // So: a dateless row inherits the customer's delivery date when they have
+    // exactly one. Genuinely different dates still split (a customer ordering for
+    // two separate days gets a sheet each) — only the blank case is absorbed.
+    const datesByCustLoc = new Map()
+    items.forEach(o => {
+      if (!o.del_date) return
+      const k = custLocKey(o)
+      if (!datesByCustLoc.has(k)) datesByCustLoc.set(k, new Set())
+      datesByCustLoc.get(k).add(String(o.del_date).slice(0, 10))
+    })
+    const resolvedDelivery = (o) => {
+      if (o.del_date) return String(o.del_date).slice(0, 10)
+      const dated = datesByCustLoc.get(custLocKey(o))
+      if (dated && dated.size === 1) return [...dated][0]
+      return rowDelivery(o)
+    }
+
     const groups = []; const map = new Map()
     items.forEach(o => {
       const cust = (o.cust_name || '').trim()
-      const loc = (o.location || '').trim()
-      const del = rowDelivery(o)
-      const key = (cust ? `cust:${cust}||loc:${loc}` : `loc:${loc}`) + `||del:${del}`
+      const key = `${custLocKey(o)}||del:${resolvedDelivery(o)}`
       let g = map.get(key)
       if (!g) { g = { cust_name: cust, locations: new Set(), rows: [] }; map.set(key, g); groups.push(g) }
       if (o.location) g.locations.add(o.location)
@@ -404,7 +431,9 @@ export default function SpecialOrders() {
 
     const sheets = groups.map(g => {
       const total = g.rows.reduce((s, o) => s + (parseFloat(o.units) || 0) * (parseFloat(o.price) || 0), 0)
-      const delDates = [...new Set(g.rows.map(rowDelivery).filter(Boolean))]
+      // Same resolution as the grouping, or the sheet header would print the
+      // computed fallback date next to rows that inherited the real one.
+      const delDates = [...new Set(g.rows.map(resolvedDelivery).filter(Boolean))]
       const delStr = delDates.length ? delDates.map(fmtDate).join(', ') : dateStr
       const rows = g.rows.map(o => {
         const u = parseFloat(o.units) || 0, p = parseFloat(o.price) || 0
