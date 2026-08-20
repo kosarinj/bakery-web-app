@@ -325,6 +325,12 @@ export default function SpecialOrders() {
       const sel = products.find(p => p.prod_name === selectedName)
       if (sel) list = [sel, ...list]
     }
+    // Alphabetical, so a product can be found by name rather than by scrolling.
+    // Sorted after the selected-product splice above so it lands in its proper
+    // place instead of being pinned to the top. numeric:true keeps "Item 2"
+    // ahead of "Item 10", and sensitivity ignores case.
+    list = [...list].sort((a, b) => (a.prod_name || '').localeCompare(
+      b.prod_name || '', undefined, { numeric: true, sensitivity: 'base' }))
     const types = [...new Set(list.map(p => p.prod_type).filter(Boolean))].sort()
     if (types.length === 0) return list.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
     return (
@@ -368,8 +374,11 @@ export default function SpecialOrders() {
   }
 
   // All products grouped by Type, for editing an existing row's product (no add-panel filters).
+  // Sorted the same way as the Add panel — two dropdowns over the same products
+  // in different orders is its own small confusion.
   function allProductOptions() {
-    const list = products
+    const list = [...products].sort((a, b) => (a.prod_name || '').localeCompare(
+      b.prod_name || '', undefined, { numeric: true, sensitivity: 'base' }))
     const types = [...new Set(list.map(p => p.prod_type).filter(Boolean))].sort()
     if (types.length === 0) return list.map(p => <option key={p.prod_name} value={p.prod_name}>{p.prod_name}</option>)
     return (
@@ -487,8 +496,12 @@ export default function SpecialOrders() {
       const cust = (o.cust_name || '').trim()
       const key = `${custLocKey(o)}||del:${resolvedDelivery(o)}`
       let g = map.get(key)
-      if (!g) { g = { cust_name: cust, locations: new Set(), rows: [] }; map.set(key, g); groups.push(g) }
+      if (!g) { g = { cust_name: cust, locations: new Set(), phones: new Set(), rows: [] }; map.set(key, g); groups.push(g) }
       if (o.location) g.locations.add(o.location)
+      // Phone is per row, but a customer's sheet should carry it. Collected as a
+      // set like locations so the odd row with a different number shows both
+      // rather than silently picking one.
+      if (o.phone && String(o.phone).trim()) g.phones.add(String(o.phone).trim())
       g.rows.push(o)
     })
 
@@ -504,9 +517,10 @@ export default function SpecialOrders() {
       }).join('')
       return `<div class="sheet">
         <div class="sheet-head"><img class="logo" src="${esc(logoSrc)}" alt="${esc(title)}" onerror="this.outerHTML='<h1>'+this.alt+'</h1>'" /></div>
-        <div class="meta"><span class="lbl">Delivery Date:</span> ${delStr}</div>
-        ${g.cust_name ? `<div class="meta"><span class="lbl">Customer:</span> ${esc(g.cust_name)}</div>` : ''}
         ${[...g.locations].filter(Boolean).length ? `<div class="meta loc"><span class="lbl">Location:</span> <span class="locval">${esc([...g.locations].join(', '))}</span></div>` : ''}
+        ${g.cust_name ? `<div class="meta"><span class="lbl">Name:</span> ${esc(g.cust_name)}</div>` : ''}
+        ${[...g.phones].length ? `<div class="meta"><span class="lbl">Phone #:</span> ${esc([...g.phones].join(', '))}</div>` : ''}
+        <div class="meta"><span class="lbl">Delivery Date:</span> ${delStr}</div>
         <table>
           <thead><tr><th class="qty">Qty</th><th>Product Name</th><th class="num">Price</th><th class="notes">Notes</th><th class="num">Subtotal</th></tr></thead>
           <tbody>${rows}</tbody>
