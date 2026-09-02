@@ -464,7 +464,11 @@ app.get('/api/orders', requireAuth, async (req, res) => {
   const { date, account } = req.query
   const conditions = []
   const vals = []
-  if (date) { vals.push(date); conditions.push(`o.ordr_dt = $${vals.length}`) }
+  // Match the tickets export: a row belongs to a date if it was ordered then or
+  // delivers then. Filtering on ordr_dt alone made the same date show different
+  // data in two places — extras with a 9/2 delivery printed on the 9/2 ticket
+  // and were invisible on the 9/2 Orders screen.
+  if (date) { vals.push(date); conditions.push(`(o.ordr_dt = $${vals.length} OR o.del_date = $${vals.length})`) }
   // TRIM both sides, as the tickets export does. Account names carry stray
   // whitespace from the Access import, so an exact match silently returns
   // nothing for exactly the accounts that are already hardest to see.
