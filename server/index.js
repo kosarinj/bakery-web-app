@@ -551,7 +551,10 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
   // per-account percentage map can each claim their own placeholder numbers.
   const params = [from_date, to_date]
   let acctClause = ''
-  if (hasAcctFilter) { params.push(accounts); acctClause = `AND f.account = ANY($${params.length}::text[])` }
+  // Trimmed, like every other account comparison here — otherwise scoping a
+  // repeat to named accounts silently matches nothing for the padded names,
+  // which are the ones most likely to need it.
+  if (hasAcctFilter) { params.push(accounts); acctClause = `AND TRIM(f.account) = ANY(SELECT TRIM(x) FROM UNNEST($${params.length}::text[]) x)` }
 
   const pctObj = (percentages && typeof percentages === 'object' && !Array.isArray(percentages)) ? percentages : {}
   const pctAccounts = Object.keys(pctObj)
