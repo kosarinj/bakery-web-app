@@ -2419,6 +2419,46 @@ app.get('/api/activity-log', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
+/**
+ * GET /api/debug/account-match?date=YYYY-MM-DD
+ *
+ * Read-only. Answers whether the account-name whitespace theory is real instead
+ * of inferred: names that differ from their own TRIM, order rows whose account
+ * matches nothing in accounts, and what actually sits on a given date.
+ */
+app.get('/api/debug/account-match', requireAuth, async (req, res) => {
+  const date = req.query.date || null
+  try {
+    const [padded, orphans, onDate] = await Promise.all([
+      query(`SELECT name, length(name) AS len, length(TRIM(name)) AS trimmed_len
+             FROM accounts WHERE name <> TRIM(name) ORDER BY name LIMIT 50`),
+      query(`SELECT DISTINCT o.account, length(o.account) AS len
+             FROM daily_orders o
+             WHERE NOT EXISTS (SELECT 1 FROM accounts a WHERE a.name = o.account)
+             ORDER BY o.account LIMIT 50`),
+      date
+        ? query(`SELECT TRIM(o.account) AS account,
+                        COUNT(*)::int AS rows,
+                        SUM(CASE WHEN COALESCE(p.is_extra,false) THEN 1 ELSE 0 END)::int AS extra_rows,
+                        MIN(o.ordr_dt)::text AS min_ordr_dt, MAX(o.ordr_dt)::text AS max_ordr_dt,
+                        MIN(o.del_date)::text AS min_del_date, MAX(o.del_date)::text AS max_del_date
+                 FROM daily_orders o
+                 LEFT JOIN products p ON p.prod_name = o.prod_name
+                 WHERE o.ordr_dt = $1 OR o.del_date = $1
+                 GROUP BY TRIM(o.account) ORDER BY 1`, [date])
+        : Promise.resolve({ rows: [] }),
+    ])
+    res.json({
+      date,
+      paddedAccountNames: { count: padded.rows.length, sample: padded.rows },
+      orderAccountsMatchingNoAccount: { count: orphans.rows.length, sample: orphans.rows },
+      onDate: onDate.rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
 // ─── Access Database ───────────────────────────────────────────────────────
 
 // GET /api/access/info?path=... — check file exists and list importable tables
