@@ -465,7 +465,10 @@ app.get('/api/orders', requireAuth, async (req, res) => {
   const conditions = []
   const vals = []
   if (date) { vals.push(date); conditions.push(`o.ordr_dt = $${vals.length}`) }
-  if (account) { vals.push(account); conditions.push(`o.account = $${vals.length}`) }
+  // TRIM both sides, as the tickets export does. Account names carry stray
+  // whitespace from the Access import, so an exact match silently returns
+  // nothing for exactly the accounts that are already hardest to see.
+  if (account) { vals.push(account); conditions.push(`TRIM(o.account) = TRIM($${vals.length})`) }
   const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : ''
   try {
     const { rows } = await query(`
