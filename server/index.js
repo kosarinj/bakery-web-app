@@ -571,7 +571,11 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
              $2::date + COALESCE(a.postord::int, 0),
              NOW()
       FROM daily_orders f
-      JOIN accounts a ON a.name = f.account
+      -- TRIM on both sides, matching the tickets export. Without it an account
+      -- name carrying stray whitespace fails this INNER join and its rows are
+      -- dropped from the repeat silently — no error, just a lower count. That
+      -- is how 9/2 came out with market extras and no market orders.
+      JOIN accounts a ON TRIM(a.name) = TRIM(f.account)
       LEFT JOIN (
         SELECT UNNEST($${accIdx}::text[]) AS account, UNNEST($${valIdx}::numeric[]) AS factor
       ) p ON p.account = f.account
@@ -1201,7 +1205,7 @@ app.get('/api/billing/tickets', requireAuth, async (req, res) => {
       SELECT t.*, (t.total - t.paid) AS outstanding,
              a.route, a.acctgrp, a.category
       FROM track_tix t
-      LEFT JOIN accounts a ON a.name = t.account
+      LEFT JOIN accounts a ON TRIM(a.name) = TRIM(t.account)
       WHERE ${conditions.join(' AND ')}
       ORDER BY t.tix_date DESC, t.account
     `, vals)
