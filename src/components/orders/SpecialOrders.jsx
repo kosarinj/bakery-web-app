@@ -110,6 +110,34 @@ function MiniCalendar({ dates, selected, onSelect }) {
   )
 }
 
+// A product dropdown that stays empty until it is actually used.
+//
+// Every row carries a full product picker, so rendering them eagerly put
+// rows x products <option> nodes on the page — with 349 orders and 605 products
+// that is over 200,000 elements, which is why a busy day took several seconds to
+// draw. Only the row being changed ever needs the list, so hold just the current
+// value until the control is opened.
+//
+// mousedown/focus/keydown are discrete events, so React flushes the state update
+// synchronously before the browser opens the popup — the full list is in place by
+// the time it drops down.
+function ProductSelect({ value, options, known, onChange }) {
+  const [loaded, setLoaded] = useState(false)
+  const populate = () => setLoaded(true)
+  return (
+    <select value={value || ''} onChange={e => onChange(e.target.value)}
+      onMouseDown={populate} onFocus={populate} onKeyDown={populate}
+      title="Change this order's product"
+      style={{ width: '100%', maxWidth: 200, fontWeight: 500, fontSize: 13, border: '1px solid transparent', borderRadius: 'var(--radius-sm)', padding: '2px 4px', background: 'transparent', cursor: 'pointer' }}
+      onMouseEnter={e => e.currentTarget.style.border = '1px solid var(--border)'}
+      onMouseLeave={e => e.currentTarget.style.border = '1px solid transparent'}>
+      {loaded
+        ? <>{!known && <option value={value || ''}>{value || ''}</option>}{options}</>
+        : <option value={value || ''}>{value || ''}</option>}
+    </select>
+  )
+}
+
 export default function SpecialOrders() {
   const [date, setDate]         = useState('')
   const [orders, setOrders]     = useState([])
@@ -372,6 +400,11 @@ export default function SpecialOrders() {
         : o))
     } catch (e) { setError(e.message) }
   }
+
+  // Memoised: the option elements are identical for every row, so build them once
+  // per product list rather than once per row. React elements are plain objects
+  // and are safe to render in more than one place.
+  const allProductOptionEls = useMemo(() => allProductOptions(), [products])
 
   // All products grouped by Type, for editing an existing row's product (no add-panel filters).
   // Sorted the same way as the Add panel — two dropdowns over the same products
@@ -872,14 +905,11 @@ export default function SpecialOrders() {
                       <td><EditableCell value={o.location||''} onSave={v=>save(o.id,'location',v)} type="text" align="left" /></td>
                       <td><EditableCell value={o.cust_name||''} onSave={v=>save(o.id,'cust_name',v)} type="text" align="left" /></td>
                       <td>
-                        <select value={o.prod_name} onChange={e => changeProduct(o.id, e.target.value)}
-                          title="Change this order's product"
-                          style={{ width: '100%', maxWidth: 200, fontWeight: 500, fontSize: 13, border: '1px solid transparent', borderRadius: 'var(--radius-sm)', padding: '2px 4px', background: 'transparent', cursor: 'pointer' }}
-                          onMouseEnter={e => e.currentTarget.style.border = '1px solid var(--border)'}
-                          onMouseLeave={e => e.currentTarget.style.border = '1px solid transparent'}>
-                          {!products.some(p => p.prod_name === o.prod_name) && <option value={o.prod_name}>{o.prod_name}</option>}
-                          {allProductOptions()}
-                        </select>
+                        <ProductSelect
+                          value={o.prod_name}
+                          options={allProductOptionEls}
+                          known={products.some(p => p.prod_name === o.prod_name)}
+                          onChange={v => changeProduct(o.id, v)} />
                       </td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{o.prod_type || '—'}</td>
                       <td style={{ fontSize: 12, color: 'var(--text-muted)' }}>{o.prod_group || '—'}</td>
