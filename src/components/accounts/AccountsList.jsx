@@ -1,7 +1,12 @@
 import { useState, useEffect } from 'react'
 import EditableCell from '../shared/EditableCell'
 
-const CATEGORIES = ['wholesale', 'retail', 'farmers_market', 'other']
+// Price lists are user-defined, so this set is fetched rather than hardcoded.
+// The old hardcoded list ('wholesale', 'retail', 'farmers_market', 'other') did
+// not match the real data, which came from Access as GREEN MARKET / REGULAR /
+// FILL THE BASKET / HOP. An account whose category was not in the set rendered as
+// a blank dropdown, and picking anything from it silently moved that account onto
+// a price list with no prices in it.
 
 const PAGE_SIZE = 250
 
@@ -27,6 +32,7 @@ function BoolCell({ value, onChange }) {
 
 export default function AccountsList() {
   const [accounts, setAccounts] = useState([])
+  const [categories, setCategories] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
   const [newAcct, setNewAcct] = useState(EMPTY_NEW)
@@ -38,6 +44,14 @@ export default function AccountsList() {
   const [stubs, setStubs] = useState(null)   // {count, sample} — unused import leftovers
 
   useEffect(() => { load() }, [showInactive])
+
+  // The price lists an account can be assigned to.
+  useEffect(() => {
+    fetch('/api/price-categories', { credentials: 'include' })
+      .then(r => r.json())
+      .then(ls => setCategories(Array.isArray(ls) ? ls.map(l => l.name) : []))
+      .catch(() => setCategories([]))
+  }, [])
   // Only relevant once you're looking at inactive rows, since that's where they hide.
   useEffect(() => {
     if (!showInactive) { setStubs(null); return }
@@ -202,7 +216,7 @@ export default function AccountsList() {
                     <td colSpan={2}>
                       <select value={newAcct.category} onChange={e=>setNewAcct(p=>({...p,category:e.target.value}))}
                         style={{border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}>
-                        {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                        {categories.map(c=><option key={c} value={c}>{c}</option>)}
                       </select>
                     </td>
                     <td><input type="text" placeholder="Route" value={newAcct.route}
@@ -228,9 +242,16 @@ export default function AccountsList() {
                     <td><EditableCell value={a.order_group||''} onSave={v=>save(a.name,'order_group',v)} type="text" align="left"/></td>
                     <td><EditableCell value={a.subcategory||''} onSave={v=>save(a.name,'subcategory',v)} type="text" align="left"/></td>
                     <td>
-                      <select value={a.category||'wholesale'} onChange={e=>save(a.name,'category',e.target.value)}
+                      {/* Keep the account's own value as an option even when it is
+                          not a known price list, so an unrecognised category shows
+                          as itself instead of rendering blank and being overwritten
+                          by the first value in the dropdown. */}
+                      <select value={a.category||''} onChange={e=>save(a.name,'category',e.target.value)}
                         style={{border:'1px solid var(--border-light)',borderRadius:2,padding:'2px 6px',fontSize:13,background:'transparent'}}>
-                        {CATEGORIES.map(c=><option key={c} value={c}>{c}</option>)}
+                        {!a.category && <option value="">—</option>}
+                        {a.category && !categories.includes(a.category) &&
+                          <option value={a.category}>{a.category} (not a price list)</option>}
+                        {categories.map(c=><option key={c} value={c}>{c}</option>)}
                       </select>
                     </td>
                     <td><EditableCell value={a.route||''} onSave={v=>save(a.name,'route',v)} type="text" align="left"/></td>

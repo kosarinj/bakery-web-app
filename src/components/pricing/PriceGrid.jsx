@@ -13,28 +13,132 @@ export default function PriceGrid() {
   const [error, setError] = useState('')
   const [mode, setMode] = useState('standard')  // 'standard' | 'account'
 
+  // Which price list the Standard grid is showing. Each list holds its own
+  // wholesale and retail price per product; an account's category picks the list
+  // its prices come from.
+  const [lists, setLists] = useState([])
+  const [list, setList] = useState('wholesale')
+  const [busy, setBusy] = useState(false)
+
+  function loadLists(select) {
+    return fetch('/api/price-categories', { credentials: 'include' })
+      .then(r => r.json())
+      .then(ls => {
+        const arr = Array.isArray(ls) ? ls : []
+        setLists(arr)
+        // Keep the current selection if it survived; otherwise fall back to the
+        // first list rather than showing a grid for a list that no longer exists.
+        setList(prev => {
+          const want = select || prev
+          return arr.some(l => l.name === want) ? want : (arr[0]?.name || 'wholesale')
+        })
+        return arr
+      })
+  }
+
   useEffect(() => {
     Promise.all([
-      fetch('/api/prices', { credentials: 'include' }).then(r => r.json()),
+      loadLists(),
       fetch('/api/accounts', { credentials: 'include' }).then(r => r.json()),
-    ]).then(([prices, accts]) => {
-      // prices: [{prod_name, prod_type, prod_group, category, whole_price, ret_price}]
-      // Deduplicate: one row per product, show 'wholesale' prices
-      const map = {}
-      prices.forEach(p => {
-        if (!map[p.prod_name]) map[p.prod_name] = { prod_name: p.prod_name, prod_type: p.prod_type, prod_group: p.prod_group }
-        if (p.category === 'wholesale') {
-          map[p.prod_name].whole_price = parseFloat(p.whole_price) || 0
-          map[p.prod_name].ret_price = parseFloat(p.ret_price) || 0
-          map[p.prod_name].category = p.category
-        }
-      })
-      setRows(Object.values(map))
+    ]).then(([, accts]) => {
       setAccounts(accts)
       if (accts.length) setSelectedAccount(accts[0].name)
-      setLoading(false)
     }).catch(e => { setError(e.message); setLoading(false) })
   }, [])
+
+  // Re-fetch the grid whenever the selected list changes. The server returns one
+  // row per active product already scoped to the list, so there is nothing to
+  // de-duplicate here any more.
+  useEffect(() => {
+    if (!list) return
+    setLoading(true)
+    fetch(`/api/prices?category=${encodeURIComponent(list)}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(prices => {
+        setRows((Array.isArray(prices) ? prices : []).map(p => ({
+          prod_name: p.prod_name, prod_type: p.prod_type, prod_group: p.prod_group,
+          whole_price: parseFloat(p.whole_price) || 0,
+          ret_price: parseFloat(p.ret_price) || 0,
+          has_price: p.has_price,
+        })))
+        setLoading(false)
+      })
+      .catch(e => { setError(e.message); setLoading(false) })
+  }, [list])
+
+  async function addList() {
+    const name = window.prompt('Name for the new price list (e.g. GREEN MARKET):', '')
+    if (name === null) return
+    if (!name.trim()) { setError('Enter a name for the price list.'); return }
+    // Offer to start from the list on screen — building several hundred prices
+    // from scratch is not realistic, and copy-then-adjust is how these are made.
+    const copyFrom = window.confirm(
+      `Start "${name.trim()}" as a copy of "${list}"?
+
+` +
+      `OK — copy every price from "${list}", then adjust.
+` +
+      `Cancel — start with an empty list.`) ? list : ''
+    setBusy(true); setError('')
+    try {
+      const r = await fetch('/api/price-categories', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ name: name.trim(), copy_from: copyFrom }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error)
+      await loadLists(d.name)
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  async function renameList() {
+    const current = lists.find(l => l.name === list)
+    const name = window.prompt(`Rename price list "${list}" to:`, list)
+    if (name === null || name.trim() === list) return
+    if (!name.trim()) { setError('Enter a name for the price list.'); return }
+    if (current?.account_count) {
+      if (!window.confirm(
+        `${current.account_count} account${current.account_count === 1 ? '' : 's'} use "${list}".
+
+` +
+        `They will be moved to "${name.trim()}" so their prices keep working. Continue?`)) return
+    }
+    setBusy(true); setError('')
+    try {
+      const r = await fetch(`/api/price-categories/${encodeURIComponent(list)}`, {
+        method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ name: name.trim() }),
+      })
+      const d = await r.json()
+      if (!r.ok) throw new Error(d.error)
+      await loadLists(name.trim())
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
+
+  async function deleteList() {
+    if (lists.length <= 1) { setError('There has to be at least one price list.'); return }
+    if (!window.confirm(`Delete the price list "${list}"?`)) return
+    setBusy(true); setError('')
+    try {
+      let r = await fetch(`/api/price-categories/${encodeURIComponent(list)}`, {
+        method: 'DELETE', credentials: 'include' })
+      let d = await r.json()
+      // 409 means the list still holds prices — a second, specific confirmation,
+      // because this is the step that actually destroys pricing data.
+      if (r.status === 409 && d.needsConfirm) {
+        if (!window.confirm(`"${list}" still has ${d.prices} prices in it.
+
+Delete the list and all of its prices?`)) {
+          setBusy(false); return
+        }
+        r = await fetch(`/api/price-categories/${encodeURIComponent(list)}?force=1`, {
+          method: 'DELETE', credentials: 'include' })
+        d = await r.json()
+      }
+      if (!r.ok) throw new Error(d.error)
+      await loadLists()
+    } catch (e) { setError(e.message) } finally { setBusy(false) }
+  }
 
   useEffect(() => {
     if (!selectedAccount || mode !== 'account') return
@@ -53,7 +157,7 @@ export default function PriceGrid() {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ prod_name, category: 'wholesale', [field]: value })
+        body: JSON.stringify({ prod_name, category: list, [field]: value })
       })
       setRows(prev => prev.map(r => r.prod_name === prod_name ? { ...r, [field]: value } : r))
     } catch (e) {
@@ -116,6 +220,28 @@ export default function PriceGrid() {
           >Account Prices</button>
         </div>
 
+        {mode === 'standard' && (
+          <>
+            <label>
+              Price list:
+              <select value={list} onChange={e => setList(e.target.value)} disabled={busy}
+                style={{ marginLeft: 6, border: '1px solid var(--border)', borderRadius: 'var(--radius)', padding: '4px 8px', fontSize: 13, fontWeight: 600 }}>
+                {lists.map(l => (
+                  <option key={l.name} value={l.name}>
+                    {l.name}{l.account_count ? ` (${l.account_count} accounts)` : ''}
+                  </option>
+                ))}
+              </select>
+            </label>
+            <button className="btn btn-sm btn-secondary" onClick={addList} disabled={busy}
+              title="Add a new price list, optionally copied from this one">+ New list</button>
+            <button className="btn btn-sm btn-secondary" onClick={renameList} disabled={busy}
+              title="Rename this price list">Rename</button>
+            <button className="btn btn-sm btn-secondary" onClick={deleteList} disabled={busy || lists.length <= 1}
+              title={lists.length <= 1 ? 'There has to be at least one price list' : 'Delete this price list'}>Delete</button>
+          </>
+        )}
+
         {mode === 'account' && (
           <label>
             Account:
@@ -141,7 +267,10 @@ export default function PriceGrid() {
         </select>
         <input type="text" placeholder="Search…" value={search} onChange={e => setSearch(e.target.value)}
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 130 }} />
-        <span className="toolbar-info">{filteredRows.length} of {rows.length}</span>
+        <span className="toolbar-info">
+          {filteredRows.length} of {rows.length}
+          {mode === 'standard' && ` · ${rows.filter(r => r.has_price).length} priced in ${list}`}
+        </span>
       </div>
 
       {error && <div className="error-message">{error}</div>}

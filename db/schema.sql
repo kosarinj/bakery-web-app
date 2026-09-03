@@ -65,6 +65,18 @@ CREATE TABLE IF NOT EXISTS prices (
   UNIQUE(prod_name, category)
 );
 
+-- Named price lists. prices is keyed (prod_name, category), so each list holds a
+-- wholesale and a retail price per product — mirroring the old VB6 program, where
+-- each account category (GREEN MARKET, REGULAR, FILL THE BASKET, HOP) had its own
+-- price list. This table lets a list be named before it has any prices in it.
+CREATE TABLE IF NOT EXISTS price_categories (
+  name       TEXT PRIMARY KEY,
+  sort_order INTEGER DEFAULT 0,
+  notes      TEXT,
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+INSERT INTO price_categories(name) VALUES ('wholesale') ON CONFLICT (name) DO NOTHING;
+
 CREATE TABLE IF NOT EXISTS account_prices (
   account TEXT REFERENCES accounts(name) ON UPDATE CASCADE,
   prod_name TEXT REFERENCES products(prod_name) ON UPDATE CASCADE,

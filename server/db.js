@@ -168,6 +168,41 @@ async function initDB() {
     console.log('Applied: spec_orders location / stale-delivery indexes')
   }
 
+  // Price lists (categories).
+  //
+  // The prices table has always been keyed (prod_name, category), so more than
+  // one price list was possible in the data from the start — the UI just pinned
+  // everything to 'wholesale'. The old VB6 program worked exactly this way: a
+  // price list per account category (GREEN MARKET, REGULAR, FILL THE BASKET,
+  // HOP), each holding both a wholesale and a retail price per product.
+  //
+  // This table exists so a list can be created and named before it has any
+  // prices in it. Deriving the list from DISTINCT prices.category instead would
+  // mean a brand-new list vanished on reload until someone typed a price into it.
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS price_categories (
+      name       TEXT PRIMARY KEY,
+      sort_order INTEGER DEFAULT 0,
+      notes      TEXT,
+      created_at TIMESTAMPTZ DEFAULT NOW()
+    )
+  `)
+
+  // Seed from whatever is already in use, so imported lists appear on first run
+  // rather than having to be re-created by hand. TRIM for the same reason every
+  // other account comparison does: the Access import leaves padded values.
+  await pool.query(`
+    INSERT INTO price_categories(name)
+    SELECT DISTINCT TRIM(category) FROM prices
+      WHERE category IS NOT NULL AND TRIM(category) <> ''
+    UNION
+    SELECT DISTINCT TRIM(category) FROM accounts
+      WHERE category IS NOT NULL AND TRIM(category) <> ''
+    ON CONFLICT (name) DO NOTHING
+  `)
+  // A database with no prices yet still needs one list to put prices into.
+  await pool.query(`INSERT INTO price_categories(name) VALUES ('wholesale') ON CONFLICT (name) DO NOTHING`)
+
   // Activity log table
   const { rows: logCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='activity_log' LIMIT 1`)
   if (!logCheck.length) {

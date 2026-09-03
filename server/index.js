@@ -439,27 +439,176 @@ app.post('/api/daily-inventory', requireAuth, async (req, res) => {
 
 // ─── Prices ────────────────────────────────────────────────────────────────
 
-app.get('/api/prices', requireAuth, async (req, res) => {
-  const { rows } = await query(`
-    SELECT p.prod_name, p.prod_type, p.prod_group,
-           pr.id, pr.category, pr.whole_price, pr.ret_price, pr.last_update
-    FROM products p
-    LEFT JOIN prices pr ON pr.prod_name = p.prod_name
-    WHERE p.active = true
-    ORDER BY p.prod_group, p.prod_name, pr.category
-  `)
-  res.json(rows)
+// ─── Price lists (categories) ───────────────────────────────────────────────
+//
+// prices is keyed (prod_name, category), so each named list carries its own
+// wholesale and retail price per product. An account's `category` selects which
+// list its prices come from — the same arrangement the old VB6 program used.
+
+// Every list, with how much is riding on it, so the UI can warn before a rename
+// or a delete rather than after.
+app.get('/api/price-categories', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT c.name, c.sort_order, c.notes,
+             (SELECT COUNT(*)::int FROM prices   p WHERE TRIM(p.category) = c.name) AS price_count,
+             (SELECT COUNT(*)::int FROM accounts a WHERE TRIM(a.category) = c.name) AS account_count
+      FROM price_categories c
+      ORDER BY c.sort_order, c.name
+    `)
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Create a list. `copy_from` seeds it with another list's prices, which is how a
+// new list is actually built in practice — start from the closest existing one
+// and adjust, rather than retyping several hundred products.
+app.post('/api/price-categories', requireAuth, async (req, res) => {
+  const name = (req.body?.name || '').trim()
+  const copyFrom = (req.body?.copy_from || '').trim()
+  if (!name) return res.status(400).json({ error: 'Enter a name for the price list.' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows: exists } = await client.query(
+      'SELECT 1 FROM price_categories WHERE LOWER(name) = LOWER($1)', [name])
+    if (exists.length) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: `A price list called "${name}" already exists.` })
+    }
+    await client.query('INSERT INTO price_categories(name) VALUES ($1)', [name])
+    let copied = 0
+    if (copyFrom) {
+      const { rowCount } = await client.query(`
+        INSERT INTO prices(prod_name, category, whole_price, ret_price, last_update)
+        SELECT prod_name, $2, whole_price, ret_price, NOW()
+        FROM prices WHERE TRIM(category) = $1
+        ON CONFLICT (prod_name, category) DO NOTHING
+      `, [copyFrom, name])
+      copied = rowCount
+    }
+    await client.query('COMMIT')
+    await logActivity(req, 'add_price_list',
+      `Added price list "${name}"${copyFrom ? ` copied from "${copyFrom}" (${copied} prices)` : ''}`)
+    res.json({ success: true, name, copied })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(400).json({ error: e.message })
+  } finally { client.release() }
+})
+
+// Rename. The name is the join key used by both prices and accounts, so all three
+// have to move together or accounts silently fall back to no price list at all.
+app.patch('/api/price-categories/:name', requireAuth, async (req, res) => {
+  const oldName = req.params.name
+  const newName = (req.body?.name || '').trim()
+  if (!newName) return res.status(400).json({ error: 'Enter a name for the price list.' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows: exists } = await client.query(
+      'SELECT 1 FROM price_categories WHERE LOWER(name) = LOWER($1) AND name <> $2', [newName, oldName])
+    if (exists.length) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: `A price list called "${newName}" already exists.` })
+    }
+    await client.query('UPDATE price_categories SET name = $1 WHERE name = $2', [newName, oldName])
+    const { rowCount: pc } = await client.query(
+      'UPDATE prices   SET category = $1 WHERE TRIM(category) = $2', [newName, oldName])
+    const { rowCount: ac } = await client.query(
+      'UPDATE accounts SET category = $1 WHERE TRIM(category) = $2', [newName, oldName])
+    await client.query('COMMIT')
+    await logActivity(req, 'rename_price_list',
+      `Renamed price list "${oldName}" to "${newName}" (${pc} prices, ${ac} accounts)`)
+    res.json({ success: true, prices: pc, accounts: ac })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(400).json({ error: e.message })
+  } finally { client.release() }
+})
+
+// Delete. Refuses while accounts still point at the list, because removing it
+// would leave those accounts priced from nothing with no visible sign of it.
+// ?force=1 deletes the list's prices too, once the caller has confirmed.
+app.delete('/api/price-categories/:name', requireAuth, async (req, res) => {
+  const name = req.params.name
+  const force = req.query.force === '1'
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows: [use] } = await client.query(`
+      SELECT (SELECT COUNT(*)::int FROM accounts WHERE TRIM(category) = $1) AS accounts,
+             (SELECT COUNT(*)::int FROM prices   WHERE TRIM(category) = $1) AS prices
+    `, [name])
+    if (use.accounts > 0) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({
+        error: `${use.accounts} account${use.accounts === 1 ? ' is' : 's are'} still using "${name}". ` +
+               `Move them to another price list first.`,
+        accounts: use.accounts,
+      })
+    }
+    if (use.prices > 0 && !force) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({
+        error: `"${name}" still has ${use.prices} prices in it.`,
+        prices: use.prices, needsConfirm: true,
+      })
+    }
+    await client.query('DELETE FROM prices WHERE TRIM(category) = $1', [name])
+    await client.query('DELETE FROM price_categories WHERE name = $1', [name])
+    await client.query('COMMIT')
+    await logActivity(req, 'delete_price_list', `Deleted price list "${name}" (${use.prices} prices)`)
+    res.json({ success: true, deletedPrices: use.prices })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(400).json({ error: e.message })
+  } finally { client.release() }
+})
+
+// One row per active product, carrying that product's price in the requested
+// list. Joining without a category gave a row per product PER list, which the
+// client then had to de-duplicate by throwing all but 'wholesale' away — that is
+// what made the other price lists invisible even though the data was there.
+app.get('/api/prices', requireAuth, async (req, res) => {
+  const category = (req.query.category || 'wholesale').trim()
+  try {
+    const { rows } = await query(`
+      SELECT p.prod_name, p.prod_type, p.prod_group,
+             pr.id, $1::text AS category,
+             COALESCE(pr.whole_price, 0) AS whole_price,
+             COALESCE(pr.ret_price, 0)   AS ret_price,
+             (pr.id IS NOT NULL) AS has_price,
+             pr.last_update
+      FROM products p
+      LEFT JOIN prices pr ON pr.prod_name = p.prod_name AND TRIM(pr.category) = $1
+      WHERE p.active = true
+      ORDER BY p.prod_group, p.prod_name
+    `, [category])
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// The grid saves one cell at a time, so a request carries only the field that
+// changed. Absent must therefore mean "leave alone", not "set to zero" — writing
+// EXCLUDED for both columns wiped the retail price every time a wholesale price
+// was edited, and vice versa.
 app.put('/api/prices', requireAuth, async (req, res) => {
   const { prod_name, category, whole_price, ret_price } = req.body
+  const w = whole_price === undefined || whole_price === null || whole_price === '' ? null : Number(whole_price)
+  const r = ret_price   === undefined || ret_price   === null || ret_price   === '' ? null : Number(ret_price)
+  if ((w !== null && Number.isNaN(w)) || (r !== null && Number.isNaN(r))) {
+    return res.status(400).json({ error: 'Price must be a number.' })
+  }
   try {
     await query(
       `INSERT INTO prices(prod_name, category, whole_price, ret_price, last_update)
-       VALUES($1,$2,$3,$4,NOW())
+       VALUES($1,$2,COALESCE($3,0),COALESCE($4,0),NOW())
        ON CONFLICT(prod_name, category) DO UPDATE SET
-         whole_price=EXCLUDED.whole_price, ret_price=EXCLUDED.ret_price, last_update=NOW()`,
-      [prod_name, category||'wholesale', whole_price||0, ret_price||0]
+         whole_price = COALESCE($3, prices.whole_price),
+         ret_price   = COALESCE($4, prices.ret_price),
+         last_update = NOW()`,
+      [prod_name, (category || 'wholesale').trim(), w, r]
     )
     res.json({ success: true })
   } catch (e) {
