@@ -2473,6 +2473,51 @@ app.get('/api/debug/slow', requireAuth, (req, res) => {
 })
 
 /**
+ * GET /api/debug/spec-orders-dupes
+ *
+ * Tests one specific theory: that re-importing a spec_orders file appends the
+ * whole file again. The bulk import relies on ON CONFLICT DO NOTHING, but the
+ * only unique index on the table is partial (order_num IS NOT NULL), so a row
+ * with a NULL order_num can never conflict and always inserts.
+ *
+ * Read-only — counts only, deletes nothing.
+ */
+app.get('/api/debug/spec-orders-dupes', requireAuth, async (req, res) => {
+  // What a human would call "the same order twice": same customer, same product,
+  // same day, same quantity. order_num is deliberately excluded — it is the
+  // column that is missing on the imports we suspect.
+  const KEY = `account, prod_name, ordr_dt, location, cust_name, units, price`
+  try {
+    const [totals, dupes, worst, byDate] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS total_rows,
+                    COUNT(order_num)::int AS with_order_num,
+                    COUNT(*) FILTER (WHERE order_num IS NULL)::int AS null_order_num
+             FROM spec_orders`),
+      query(`SELECT COUNT(*)::int AS duplicate_groups,
+                    COALESCE(SUM(n - 1), 0)::int AS excess_rows
+             FROM (SELECT COUNT(*) AS n FROM spec_orders GROUP BY ${KEY} HAVING COUNT(*) > 1) g`),
+      query(`SELECT account, prod_name, ordr_dt::text, location, cust_name, units, price, COUNT(*)::int AS copies
+             FROM spec_orders GROUP BY ${KEY} HAVING COUNT(*) > 1
+             ORDER BY COUNT(*) DESC, ordr_dt DESC LIMIT 15`),
+      query(`SELECT ordr_dt::text AS date, COUNT(*)::int AS rows
+             FROM spec_orders GROUP BY ordr_dt ORDER BY COUNT(*) DESC LIMIT 10`),
+    ])
+    const t = totals.rows[0], d = dupes.rows[0]
+    res.json({
+      verdict: d.excess_rows > 0
+        ? `${d.excess_rows} rows look like re-imported copies of ${d.duplicate_groups} distinct orders`
+        : 'No duplicate orders found — the re-import theory does not hold',
+      totals: t,
+      duplicates: d,
+      worstOffenders: worst.rows,
+      heaviestDates: byDate.rows,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/debug/spec-orders-plan?date=YYYY-MM-DD
  *
  * Everything needed to explain a slow Special Orders screen: how big the table
