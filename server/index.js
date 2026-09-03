@@ -37,6 +37,36 @@ const requireAuth = (req, res, next) => {
   next()
 }
 
+// ── Request timing ──
+// Records how long each /api request takes so a "the app feels slow" report can
+// be answered with a measurement instead of a guess. Kept in memory only (a ring
+// buffer of the slowest recent requests) and readable at /api/debug/slow, so it
+// works without access to the deploy logs. Also reports pool saturation, since a
+// request can be slow purely from waiting on a connection rather than on SQL.
+const SLOW_MS = 1000
+const slowLog = []
+app.use('/api', (req, res, next) => {
+  const started = process.hrtime.bigint()
+  res.on('finish', () => {
+    const ms = Number(process.hrtime.bigint() - started) / 1e6
+    if (ms < SLOW_MS || req.path === '/events' || req.path === '/debug/slow') return
+    const entry = {
+      at: new Date().toISOString(),
+      method: req.method,
+      url: (req.originalUrl || '').split('?')[0],
+      query: req.query,
+      ms: Math.round(ms),
+      status: res.statusCode,
+      pool: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+    }
+    slowLog.push(entry)
+    if (slowLog.length > 100) slowLog.shift()
+    console.warn(`SLOW ${entry.ms}ms ${entry.method} ${entry.url}`, JSON.stringify(entry.query),
+                 `pool total=${entry.pool.total} idle=${entry.pool.idle} waiting=${entry.pool.waiting}`)
+  })
+  next()
+})
+
 // ── Real-time fan-out via Server-Sent Events ──
 // Any logged-in client can subscribe at GET /api/events. After any successful
 // mutating /api request we broadcast which resource changed (e.g. "spec-orders"),
@@ -2424,6 +2454,83 @@ app.get('/api/activity-log', requireAuth, async (req, res) => {
     vals
   )
   res.json(rows)
+})
+
+/**
+ * GET /api/debug/slow
+ *
+ * The slowest recent /api requests (over 1s), newest last, with the connection
+ * pool's state at the time each finished. `waiting` above 0 means requests were
+ * queued for a connection — the slowness is contention, not the query itself.
+ */
+app.get('/api/debug/slow', requireAuth, (req, res) => {
+  res.json({
+    thresholdMs: SLOW_MS,
+    poolNow: { total: pool.totalCount, idle: pool.idleCount, waiting: pool.waitingCount },
+    sseClients: sseClients.size,
+    requests: slowLog,
+  })
+})
+
+/**
+ * GET /api/debug/spec-orders-plan?date=YYYY-MM-DD
+ *
+ * Everything needed to explain a slow Special Orders screen: how big the table
+ * actually is, which indexes exist (i.e. whether the index migration has run on
+ * this deploy), and the real plan + timing for each query the screen fires.
+ * Read-only — EXPLAIN ANALYZE on SELECTs executes them but changes nothing.
+ */
+app.get('/api/debug/spec-orders-plan', requireAuth, async (req, res) => {
+  const date = req.query.date || null
+  const explain = async (label, sql, params = []) => {
+    const started = Date.now()
+    try {
+      const { rows } = await query(`EXPLAIN (ANALYZE, BUFFERS, FORMAT TEXT) ${sql}`, params)
+      return { label, ms: Date.now() - started, plan: rows.map(r => r['QUERY PLAN']) }
+    } catch (e) {
+      return { label, ms: Date.now() - started, error: e.message }
+    }
+  }
+  try {
+    const [sizes, indexes] = await Promise.all([
+      query(`SELECT relname AS table,
+                    to_char(n_live_tup, 'FM999,999,999') AS approx_rows,
+                    pg_size_pretty(pg_total_relation_size(relid)) AS total_size
+             FROM pg_stat_user_tables
+             WHERE relname IN ('spec_orders','daily_orders','track_tix','accounts','products')
+             ORDER BY pg_total_relation_size(relid) DESC`),
+      query(`SELECT tablename, indexname, pg_size_pretty(pg_relation_size(indexname::regclass)) AS size
+             FROM pg_indexes
+             WHERE tablename IN ('spec_orders','daily_orders','track_tix','accounts')
+             ORDER BY tablename, indexname`),
+    ])
+
+    const plans = []
+    plans.push(await explain('spec-orders/dates',
+      `SELECT ordr_dt::text AS date, COUNT(*) AS count FROM spec_orders GROUP BY ordr_dt ORDER BY ordr_dt DESC`))
+    plans.push(await explain('spec-orders/locations',
+      `SELECT DISTINCT location FROM spec_orders WHERE location IS NOT NULL AND location <> '' ORDER BY location`))
+    if (date) {
+      plans.push(await explain('spec-orders?date',
+        `SELECT s.*, p.prod_type, p.prod_group FROM spec_orders s
+         LEFT JOIN products p ON p.prod_name = s.prod_name
+         WHERE s.ordr_dt = $1 ORDER BY s.ordr_dt, s.account, s.prod_name`, [date]))
+      plans.push(await explain('spec-orders/stale-delivery',
+        `SELECT id, ordr_dt, del_date, location, cust_name, prod_name, (COUNT(*) OVER ())::int AS total
+         FROM spec_orders WHERE ${STALE_DELIVERY_WHERE} AND ordr_dt = $1::date
+         ORDER BY ordr_dt DESC, location, cust_name LIMIT 50`, [date]))
+    }
+
+    res.json({
+      date,
+      note: 'approx_rows comes from the stats collector; run ANALYZE if it looks stale',
+      tables: sizes.rows,
+      indexes: indexes.rows,
+      plans,
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
 })
 
 /**
