@@ -121,6 +121,53 @@ async function initDB() {
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_account  ON daily_orders(account)`)
   await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_del_date ON daily_orders(del_date)`)
 
+  // Expression indexes on TRIM(account) / TRIM(name).
+  //
+  // Account comparisons are trimmed on both sides now, because names carry stray
+  // whitespace from the Access import and an exact match silently drops rows.
+  // But TRIM(account) can't use an index on the raw account column — Postgres
+  // only matches an index whose key is the same expression the query uses — so
+  // the trimmed comparisons turned into full table scans of daily_orders and
+  // track_tix. These restore index access without going back to the exact match.
+  //
+  // btrim() is immutable, so it is legal in an index key.
+  //
+  // An expression index needs its own ANALYZE before the planner has statistics
+  // for the expression, so create-then-analyze, and only on the boot that
+  // actually creates them — not on every restart.
+  const { rows: trimIdx } = await pool.query(
+    `SELECT indexname FROM pg_indexes WHERE indexname IN
+       ('idx_daily_orders_account_trim','idx_track_tix_account_trim','idx_accounts_name_trim')`
+  )
+  if (trimIdx.length < 3) {
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_daily_orders_account_trim ON daily_orders((TRIM(account)))`)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_track_tix_account_trim    ON track_tix((TRIM(account)))`)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_accounts_name_trim        ON accounts((TRIM(name)))`)
+    await pool.query(`ANALYZE daily_orders`)
+    await pool.query(`ANALYZE track_tix`)
+    await pool.query(`ANALYZE accounts`)
+    console.log('Applied: TRIM(account) expression indexes')
+  }
+
+  // Special orders is the largest table in the app, and the Special Orders screen
+  // hits it with three queries that no existing index covers: DISTINCT location on
+  // every mount, and the stale-delivery check on every date change.
+  //
+  // The partial index's predicate matches STALE_DELIVERY_WHERE in server/index.js
+  // exactly — if that condition changes, this predicate has to change with it or
+  // the planner quietly stops using it.
+  const { rows: specIdx } = await pool.query(
+    `SELECT indexname FROM pg_indexes WHERE indexname IN
+       ('idx_spec_orders_location','idx_spec_orders_stale_del')`
+  )
+  if (specIdx.length < 2) {
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_spec_orders_location ON spec_orders(location)`)
+    await pool.query(`CREATE INDEX IF NOT EXISTS idx_spec_orders_stale_del
+                      ON spec_orders(ordr_dt) WHERE del_date IS NOT NULL AND del_date < ordr_dt`)
+    await pool.query(`ANALYZE spec_orders`)
+    console.log('Applied: spec_orders location / stale-delivery indexes')
+  }
+
   // Activity log table
   const { rows: logCheck } = await pool.query(`SELECT 1 FROM information_schema.tables WHERE table_name='activity_log' LIMIT 1`)
   if (!logCheck.length) {

@@ -1050,11 +1050,14 @@ app.get('/api/spec-orders/stale-delivery', requireAuth, async (req, res) => {
   if (date)     { params.push(date);     where += ` AND ordr_dt = $${params.length}::date` }
   if (location) { params.push(location); where += ` AND location = $${params.length}` }
   try {
+    // COUNT(*) OVER () rather than a second COUNT query: window functions are
+    // evaluated before LIMIT, so this is still the exact total, and this screen
+    // runs the check on every date change — one pass over spec_orders instead of two.
     const { rows } = await query(
-      `SELECT id, ordr_dt, del_date, location, cust_name, prod_name
+      `SELECT id, ordr_dt, del_date, location, cust_name, prod_name, (COUNT(*) OVER ())::int AS total
        FROM spec_orders WHERE ${where} ORDER BY ordr_dt DESC, location, cust_name LIMIT 50`, params)
-    const { rows: c } = await query(`SELECT COUNT(*)::int AS count FROM spec_orders WHERE ${where}`, params)
-    res.json({ count: c[0].count, sample: rows })
+    const count = rows.length ? rows[0].total : 0
+    res.json({ count, sample: rows.map(({ total, ...r }) => r) })
   } catch (e) {
     res.status(500).json({ error: e.message })
   }

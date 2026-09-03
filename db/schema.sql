@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS accounts (
   notes TEXT,
   created_at TIMESTAMPTZ DEFAULT NOW()
 );
+CREATE INDEX IF NOT EXISTS idx_accounts_name_trim ON accounts((TRIM(name)));
 
 CREATE TABLE IF NOT EXISTS products (
   prod_name TEXT PRIMARY KEY,
@@ -91,6 +92,10 @@ CREATE TABLE IF NOT EXISTS daily_orders (
 CREATE INDEX IF NOT EXISTS idx_daily_orders_date ON daily_orders(ordr_dt);
 CREATE INDEX IF NOT EXISTS idx_daily_orders_account ON daily_orders(account);
 CREATE INDEX IF NOT EXISTS idx_daily_orders_product ON daily_orders(prod_name);
+CREATE INDEX IF NOT EXISTS idx_daily_orders_del_date ON daily_orders(del_date);
+-- Account comparisons are trimmed on both sides (names carry stray whitespace from
+-- the Access import), and TRIM(account) can't use the index on the raw column.
+CREATE INDEX IF NOT EXISTS idx_daily_orders_account_trim ON daily_orders((TRIM(account)));
 
 CREATE TABLE IF NOT EXISTS ingredients (
   id SERIAL PRIMARY KEY,
@@ -155,6 +160,7 @@ CREATE TABLE IF NOT EXISTS track_tix (
 );
 CREATE INDEX IF NOT EXISTS idx_track_tix_date    ON track_tix(tix_date DESC);
 CREATE INDEX IF NOT EXISTS idx_track_tix_account ON track_tix(account);
+CREATE INDEX IF NOT EXISTS idx_track_tix_account_trim ON track_tix((TRIM(account)));
 
 -- ─── Special Orders ───────────────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS spec_orders (
@@ -175,6 +181,11 @@ CREATE TABLE IF NOT EXISTS spec_orders (
 );
 CREATE INDEX IF NOT EXISTS idx_spec_orders_date    ON spec_orders(ordr_dt);
 CREATE INDEX IF NOT EXISTS idx_spec_orders_account ON spec_orders(account);
+CREATE INDEX IF NOT EXISTS idx_spec_orders_location ON spec_orders(location);
+-- Predicate must stay identical to STALE_DELIVERY_WHERE in server/index.js, or the
+-- planner silently stops using this index for the per-date stale-delivery check.
+CREATE INDEX IF NOT EXISTS idx_spec_orders_stale_del
+  ON spec_orders(ordr_dt) WHERE del_date IS NOT NULL AND del_date < ordr_dt;
 CREATE UNIQUE INDEX IF NOT EXISTS idx_spec_orders_order_num ON spec_orders(order_num) WHERE order_num IS NOT NULL;
 
 -- ─── Migrations: extend recipes table ────────────────────────────────────────
