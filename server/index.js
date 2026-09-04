@@ -602,11 +602,17 @@ app.put('/api/prices', requireAuth, async (req, res) => {
   }
   try {
     await query(
+      // ::numeric on every parameter, and it is not cosmetic. Written as
+      // COALESCE($3, 0) the untyped parameter takes its type from the 0, which
+      // Postgres reads as an INTEGER — so a whole price of 6.50 came back
+      // "invalid input syntax for type integer" and the write was rejected.
+      // Whole-number prices happened to survive, which is why this looked like
+      // it only affected some edits.
       `INSERT INTO prices(prod_name, category, whole_price, ret_price, last_update)
-       VALUES($1,$2,COALESCE($3,0),COALESCE($4,0),NOW())
+       VALUES($1,$2,COALESCE($3::numeric,0),COALESCE($4::numeric,0),NOW())
        ON CONFLICT(prod_name, category) DO UPDATE SET
-         whole_price = COALESCE($3, prices.whole_price),
-         ret_price   = COALESCE($4, prices.ret_price),
+         whole_price = COALESCE($3::numeric, prices.whole_price),
+         ret_price   = COALESCE($4::numeric, prices.ret_price),
          last_update = NOW()`,
       [prod_name, (category || 'wholesale').trim(), w, r]
     )

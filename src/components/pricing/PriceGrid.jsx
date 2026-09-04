@@ -153,12 +153,17 @@ Delete the list and all of its prices?`)) {
 
   async function saveStandardPrice(prod_name, field, value) {
     try {
-      await fetch('/api/prices', {
+      // The response was never checked, so a rejected write looked identical to
+      // a successful one: the cell updated locally and the value vanished on the
+      // next load. A save that fails has to say so.
+      const res = await fetch('/api/prices', {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         credentials: 'include',
         body: JSON.stringify({ prod_name, category: list, [field]: value })
       })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || `Save failed (${res.status})`)
       setRows(prev => prev.map(r => r.prod_name === prod_name ? { ...r, [field]: value } : r))
     } catch (e) {
       setError(`Save failed: ${e.message}`)
