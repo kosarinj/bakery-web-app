@@ -2728,6 +2728,50 @@ app.get('/api/debug/spec-orders-plan', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/debug/extras-census
+ *
+ * Is a date's order mix normal, or is `is_extra` over-applied?
+ *
+ * 8/31/26 came back 276 extra rows out of 282, which is either a day that
+ * imported extras only, or a product list where nearly everything carries the
+ * extras flag. The two look identical on the Orders screen and have opposite
+ * fixes, so compare the day against the product list and against other dates.
+ *
+ * Read-only.
+ */
+app.get('/api/debug/extras-census', requireAuth, async (req, res) => {
+  try {
+    const [products, overall, byDate] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS total,
+                    COUNT(*) FILTER (WHERE is_extra)::int AS flagged_extra,
+                    COUNT(*) FILTER (WHERE active)::int AS active
+             FROM products`),
+      query(`SELECT COUNT(*)::int AS rows,
+                    SUM(CASE WHEN COALESCE(p.is_extra,false) THEN 1 ELSE 0 END)::int AS extra_rows
+             FROM daily_orders o LEFT JOIN products p ON p.prod_name = o.prod_name`),
+      query(`SELECT o.ordr_dt::text AS date,
+                    COUNT(*)::int AS rows,
+                    SUM(CASE WHEN COALESCE(p.is_extra,false) THEN 1 ELSE 0 END)::int AS extra_rows,
+                    COUNT(DISTINCT TRIM(o.account))::int AS accounts
+             FROM daily_orders o LEFT JOIN products p ON p.prod_name = o.prod_name
+             GROUP BY o.ordr_dt ORDER BY o.ordr_dt DESC LIMIT 20`),
+    ])
+    const pr = products.rows[0], ov = overall.rows[0]
+    const pct = (a, b) => (b > 0 ? Math.round((a / b) * 1000) / 10 : null)
+    res.json({
+      products: { ...pr, percentFlaggedExtra: pct(pr.flagged_extra, pr.total) },
+      allOrders: { ...ov, percentExtraRows: pct(ov.extra_rows, ov.rows) },
+      recentDates: byDate.rows.map(r => ({ ...r, percentExtra: pct(r.extra_rows, r.rows) })),
+      howToRead: 'If percentFlaggedExtra is high, the products list is the problem and every '
+               + 'date will look like extras. If other dates sit far below 8/31, that import '
+               + 'brought extras only and the regular orders are genuinely missing.',
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/debug/account-match?date=YYYY-MM-DD
  *
  * Read-only. Answers whether the account-name whitespace theory is real instead
