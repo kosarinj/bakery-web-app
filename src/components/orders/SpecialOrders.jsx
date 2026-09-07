@@ -271,6 +271,17 @@ export default function SpecialOrders() {
   // Live: refetch (quietly, no loading flash) when another user changes special orders.
   useLiveRefresh('spec-orders', () => { if (date) load(true) })
 
+  // Also follow the products channel. The product list is fetched once on mount,
+  // so renaming a product elsewhere left this screen holding a name that no
+  // longer exists — every save then failed the foreign key, correctly and
+  // uselessly. Refetching keeps the dropdown current without a reload.
+  useLiveRefresh('products', () => {
+    fetch('/api/products', { credentials: 'include' })
+      .then(r => r.json())
+      .then(p => { if (Array.isArray(p)) setProducts(p) })
+      .catch(() => {})
+  })
+
   function load(quiet) {
     if (!quiet) setLoading(true)
     fetch(`/api/spec-orders?date=${date}`, { credentials: 'include' })

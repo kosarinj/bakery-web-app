@@ -1159,6 +1159,18 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
 
 // ─── Special Orders ────────────────────────────────────────────────────────
 
+// A save can fail because the screen is holding a product name that has since
+// been renamed elsewhere — the foreign key is doing its job, but
+// "violates foreign key constraint spec_orders_prod_name_fkey" tells the person
+// at the screen nothing about what to do. Name the cause and the remedy.
+function specOrderError(e) {
+  const msg = e?.message || 'Save failed'
+  if (/spec_orders_prod_name_fkey/.test(msg)) {
+    return 'That product no longer exists — it was probably renamed. Reload the page to pick up the current list.'
+  }
+  return msg
+}
+
 app.get('/api/spec-orders/locations', requireAuth, async (req, res) => {
   const { rows } = await query(
     `SELECT DISTINCT location FROM spec_orders WHERE location IS NOT NULL AND location <> '' ORDER BY location`
@@ -1211,7 +1223,7 @@ app.post('/api/spec-orders', requireAuth, async (req, res) => {
     }
 
     res.json(rows[0])
-  } catch (e) { res.status(400).json({ error: e.message }) }
+  } catch (e) { res.status(400).json({ error: specOrderError(e) }) }
 })
 
 app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
@@ -1242,7 +1254,7 @@ app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
       }
     }
     res.json({ success: true })
-  } catch (e) { res.status(400).json({ error: e.message }) }
+  } catch (e) { res.status(400).json({ error: specOrderError(e) }) }
 })
 
 app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
