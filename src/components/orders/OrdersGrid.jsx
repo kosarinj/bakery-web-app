@@ -525,7 +525,15 @@ export default function OrdersGrid() {
           </button>
         )}
         <label style={{ gap: 6, fontWeight: extrasOnly ? 700 : 400, color: extrasOnly ? 'var(--primary)' : 'inherit' }}>
-          <input type="checkbox" checked={extrasOnly} onChange={e => setExtrasOnly(e.target.checked)} />
+          {/* Extras are read grouped by Sub Type, so turning the filter on sets
+              the export grouping to match and turning it off puts it back. It
+              is a default, not a lock — the Group dropdown still overrides it. */}
+          <input type="checkbox" checked={extrasOnly}
+            onChange={e => {
+              const on = e.target.checked
+              setExtrasOnly(on)
+              setExportGroupBy(on ? 'subtype' : '')
+            }} />
           Extras
         </label>
         <label style={{ gap: 6, fontWeight: marketsOnly ? 700 : 400, color: marketsOnly ? 'var(--primary)' : 'inherit' }}
