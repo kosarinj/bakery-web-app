@@ -2778,6 +2778,73 @@ app.get('/api/debug/spec-orders-plan', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/debug/product-refs
+ *
+ * What actually references products on THIS database, and whether anything is
+ * pointing at a product that no longer exists.
+ *
+ * schema.sql declares ON UPDATE CASCADE on every product reference, but a table
+ * created before that was added can carry a plain foreign key instead. A rename
+ * then either fails outright or — if the constraint was never created — leaves
+ * rows referencing a name that is gone, which surfaces later as a foreign key
+ * error on an unrelated edit.
+ *
+ * Read-only.
+ */
+app.get('/api/debug/product-refs', requireAuth, async (req, res) => {
+  try {
+    const { rows: fks } = await query(`
+      SELECT tc.table_name, kcu.column_name, tc.constraint_name, rc.update_rule, rc.delete_rule
+      FROM information_schema.table_constraints tc
+      JOIN information_schema.key_column_usage kcu
+        ON kcu.constraint_name = tc.constraint_name
+      JOIN information_schema.referential_constraints rc
+        ON rc.constraint_name = tc.constraint_name
+      JOIN information_schema.constraint_column_usage ccu
+        ON ccu.constraint_name = tc.constraint_name
+      WHERE tc.constraint_type = 'FOREIGN KEY' AND ccu.table_name = 'products'
+      ORDER BY tc.table_name
+    `)
+
+    // Rows pointing at a product that isn't there any more.
+    const checks = [
+      ['daily_orders', 'prod_name'], ['spec_orders', 'prod_name'],
+      ['prices', 'prod_name'], ['account_prices', 'prod_name'],
+      ['inventory', 'prod_name'], ['daily_inventory', 'prod_name'],
+      ['recipes', 'product'], ['bake_list', 'prod_name'],
+      ['return_items', 'prod_name'],
+    ]
+    const orphans = []
+    for (const [table, col] of checks) {
+      try {
+        const { rows } = await query(`
+          SELECT COUNT(*)::int AS count,
+                 (ARRAY_AGG(DISTINCT t.${col}))[1:10] AS sample
+          FROM ${table} t
+          WHERE t.${col} IS NOT NULL
+            AND NOT EXISTS (SELECT 1 FROM products p WHERE p.prod_name = t.${col})
+        `)
+        if (rows[0].count > 0) orphans.push({ table, column: col, ...rows[0] })
+      } catch (e) { orphans.push({ table, column: col, error: e.message }) }
+    }
+
+    const missingCascade = fks.filter(f => f.update_rule !== 'CASCADE')
+    res.json({
+      foreignKeys: fks,
+      missingCascade,
+      orphanedRows: orphans,
+      verdict: missingCascade.length
+        ? `${missingCascade.length} product reference(s) lack ON UPDATE CASCADE — a rename cannot propagate through them`
+        : orphans.length
+          ? 'Cascades are fine, but rows are pointing at products that no longer exist'
+          : 'Every product reference cascades and nothing is orphaned',
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/debug/extras-census
  *
  * Is a date's order mix normal, or is `is_extra` over-applied?
