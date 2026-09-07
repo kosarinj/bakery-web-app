@@ -52,6 +52,7 @@ export default function ProductsList() {
   const [tab, setTab] = useState('basic')
   const [search, setSearch] = useState('')
   const [filterType, setFilterType] = useState('')
+  const [extrasOnly, setExtrasOnly] = useState(false)
 
   useEffect(() => { load() }, [showInactive])
 
@@ -100,6 +101,7 @@ export default function ProductsList() {
   const safeProducts = Array.isArray(products) ? products : []
   const q = search.toLowerCase()
   const filtered = safeProducts.filter(p => {
+    if (extrasOnly && !p.is_extra) return false
     if (filterType && (p.prod_type || '') !== filterType) return false
     if (q && !(
       (p.prod_name||'').toLowerCase().includes(q) ||
@@ -145,8 +147,13 @@ export default function ProductsList() {
           {productTypes.map(t => <option key={t} value={t}>{t}</option>)}
         </select>
         <span className="toolbar-info">
-          {(search || filterType) ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total`}
+          {(search || filterType || extrasOnly) ? `${totalShown} of ${safeProducts.length}` : `${safeProducts.length} total`}
         </span>
+        <label style={{ gap: 6, fontWeight: extrasOnly ? 700 : 400, color: extrasOnly ? 'var(--primary)' : 'inherit' }}
+          title="Show only products flagged as extras — the same flag the Orders screen filters on.">
+          <input type="checkbox" checked={extrasOnly} onChange={e => setExtrasOnly(e.target.checked)} />
+          Extras only
+        </label>
         <label style={{ gap: 6 }}>
           <input type="checkbox" checked={showInactive} onChange={e => setShowInactive(e.target.checked)} />
           Show inactive
