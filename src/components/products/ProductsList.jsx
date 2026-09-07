@@ -81,6 +81,30 @@ export default function ProductsList() {
       .catch(e => { setError(e.message); setLoading(false) })
   }
 
+  // Renaming the primary key goes through its own endpoint: every table that
+  // references a product declares ON UPDATE CASCADE, so orders, prices, recipes
+  // and the rest follow the new name in one statement — including historical
+  // ones, which is the point. A rename is the same product under a new name,
+  // not a new product.
+  async function rename(from, to) {
+    const next = String(to || '').trim()
+    if (!next || next === from) return
+    try {
+      const res = await fetch(`/api/products/${encodeURIComponent(from)}/rename`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ prod_name: next }),
+      })
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok) throw new Error(body.error || `Rename failed (${res.status})`)
+      setProducts(prev => prev.map(p => p.prod_name === from ? { ...p, prod_name: next } : p))
+      setError('')
+    } catch (e) {
+      setError(`Rename failed: ${e.message}`)
+    }
+  }
+
   async function save(prod_name, field, value) {
     try {
       await fetch(`/api/products/${encodeURIComponent(prod_name)}`, {
@@ -210,8 +234,10 @@ export default function ProductsList() {
                     {items.map(p => (
                       <tr key={p.prod_name} style={{ opacity: p.active ? 1 : 0.5 }}>
                         <td style={{ fontWeight: 600, paddingLeft: 16 }}>
-                          {p.prod_name}
-                          {p.has_recipe && <span style={{ marginLeft: 6, color: '#16a34a', fontSize: 11, fontWeight: 700 }} title="Has recipe">●</span>}
+                          <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
+                            <EditableCell value={p.prod_name} onSave={v => rename(p.prod_name, v)} type="text" align="left" />
+                            {p.has_recipe && <span style={{ color: '#16a34a', fontSize: 11, fontWeight: 700 }} title="Has recipe">●</span>}
+                          </span>
                         </td>
                         <td><TypeSelect value={p.prod_type||''} options={productTypes} onChange={v=>save(p.prod_name,'prod_type',v)}/></td>
                         <td><EditableCell value={p.prod_group||''} onSave={v=>save(p.prod_name,'prod_group',v)} type="text" align="left"/></td>

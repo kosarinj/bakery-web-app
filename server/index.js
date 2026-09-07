@@ -228,6 +228,50 @@ app.post('/api/products', requireAuth, async (req, res) => {
   }
 })
 
+/**
+ * Rename a product.
+ *
+ * prod_name is the primary key, and every table that references it — orders,
+ * spec orders, prices, account prices, inventory, daily inventory, recipes,
+ * bake list — declares ON UPDATE CASCADE. So the rename propagates in one
+ * statement and nothing is orphaned. Doing it any other way (insert new, copy,
+ * delete old) would break those links.
+ *
+ * Kept separate from the field PATCH below because renaming the key is not the
+ * same kind of edit as changing an attribute, and it needs its own failure
+ * message: colliding with an existing product is the likely mistake, and
+ * "duplicate key value violates unique constraint" is not a useful thing to
+ * show someone.
+ */
+app.patch('/api/products/:name/rename', requireAuth, async (req, res) => {
+  const from = req.params.name
+  const to = (req.body?.prod_name || '').trim()
+  if (!to) return res.status(400).json({ error: 'Enter a product name.' })
+  if (to === from) return res.json({ success: true, unchanged: true })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows: clash } = await client.query(
+      'SELECT 1 FROM products WHERE LOWER(prod_name) = LOWER($1) AND prod_name <> $2', [to, from])
+    if (clash.length) {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: `A product called "${to}" already exists.` })
+    }
+    const { rowCount } = await client.query(
+      'UPDATE products SET prod_name = $1 WHERE prod_name = $2', [to, from])
+    if (!rowCount) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: `No product called "${from}".` })
+    }
+    await client.query('COMMIT')
+    await logActivity(req, 'rename_product', `Renamed product "${from}" to "${to}"`)
+    res.json({ success: true, from, to })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(400).json({ error: e.message })
+  } finally { client.release() }
+})
+
 app.patch('/api/products/:name', requireAuth, async (req, res) => {
   const fields = [
     'prod_type','prod_group','barcode','multiplier','divisor','batch','active','notes',
