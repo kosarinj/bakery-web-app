@@ -1525,6 +1525,116 @@ app.get('/api/billing/aged', requireAuth, async (req, res) => {
 
 // ─── Billing Excel Export ─────────────────────────────────────────────────
 
+/**
+ * GET /api/billing/print/tickets?del_date=YYYY-MM-DD&account=
+ *
+ * The same tickets as the Excel export, as a printable page — one account per
+ * sheet of paper, opened in a tab and printed straight from the browser.
+ *
+ * Excel is a poor way to print these: the workbook is one worksheet per account,
+ * so printing them all means opening each tab and setting up the page for each.
+ * Here the page breaks are in the markup and Ctrl+P does the whole run.
+ *
+ * Omit `account` for every account on the date, or pass one for a single ticket.
+ */
+app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
+  const { del_date, account: acctFilter } = req.query
+  if (!del_date) return res.status(400).send('<p>del_date required</p>')
+  try {
+    const { rows: sRows } = await query(
+      `SELECT setting, value FROM settings WHERE setting IN ('bakery_name','bakery_address','bakery_phone')`)
+    const settings = Object.fromEntries(sRows.map(r => [r.setting, r.value]))
+    const bakeryName = settings.bakery_name || "Meredith's Country Bakery"
+    const bakeryAddr = settings.bakery_address || '415 Rte 28, Kingston, NY 12401'
+    const bakeryPhone = settings.bakery_phone || '(845) 331-4318'
+
+    const acctCond = acctFilter ? `AND TRIM(o.account) = $2` : ''
+    const acctVals = acctFilter ? [del_date, acctFilter] : [del_date]
+    const { rows: accounts } = await query(`
+      SELECT DISTINCT TRIM(o.account) AS account, a.route, a.sequence
+      FROM daily_orders o
+      LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
+      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      ${acctCond}
+      ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
+    `, acctVals)
+
+    const esc = (v) => String(v ?? '').replace(/[&<>"]/g, c => (
+      { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' }[c]))
+    const fmtDate = (d) => { const [y, m, dd] = String(d).slice(0, 10).split('-'); return `${+m}/${+dd}/${y}` }
+
+    const sheets = []
+    for (const acct of accounts) {
+      const { rows: lines } = await query(`
+        SELECT o.prod_name, o.units, o.wprice, p.prod_group
+        FROM daily_orders o
+        LEFT JOIN products p ON p.prod_name = o.prod_name
+        WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+          AND TRIM(o.account) = $2
+          AND o.units > 0
+        ORDER BY p.prod_group NULLS LAST, o.prod_name
+      `, [del_date, acct.account])
+      if (!lines.length) continue
+
+      let total = 0
+      const body = lines.map(l => {
+        const amt = (parseFloat(l.units) || 0) * (parseFloat(l.wprice) || 0)
+        total += amt
+        return `<tr><td class="u">${esc(l.units)}</td><td>${esc(l.prod_name)}</td>` +
+               `<td class="n">${(parseFloat(l.wprice) || 0).toFixed(2)}</td>` +
+               `<td class="n">${amt.toFixed(2)}</td></tr>`
+      }).join('')
+
+      sheets.push(`
+        <section class="ticket">
+          <div class="head">
+            <div class="who"><div class="acct">${esc(acct.account)}</div>
+              <div class="date">${fmtDate(del_date)}${acct.route ? ` · Route ${esc(acct.route)}` : ''}</div></div>
+            <div class="bak"><strong>${esc(bakeryName)}</strong><br>${esc(bakeryAddr)}<br>${esc(bakeryPhone)}</div>
+          </div>
+          <table>
+            <thead><tr><th class="u">Units</th><th>Product</th><th class="n">Price</th><th class="n">Amount</th></tr></thead>
+            <tbody>${body}</tbody>
+            <tfoot><tr><td></td><td>Total</td><td></td><td class="n">${total.toFixed(2)}</td></tr></tfoot>
+          </table>
+          <div class="sign">Received by ______________________________</div>
+        </section>`)
+    }
+
+    const empty = `<p class="none">No tickets for ${fmtDate(del_date)}${acctFilter ? ` at ${esc(acctFilter)}` : ''}.</p>`
+    res.setHeader('Content-Type', 'text/html; charset=utf-8')
+    res.send(`<!doctype html><html><head><meta charset="utf-8">
+<title>Tickets ${fmtDate(del_date)}</title>
+<style>
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #000; }
+  .ticket { padding: 18mm 14mm; page-break-after: always; }
+  .ticket:last-child { page-break-after: auto; }
+  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
+  .acct { font-size: 19px; font-weight: 700; }
+  .date { font-size: 12px; color: #333; margin-top: 2px; }
+  .bak { font-size: 10px; text-align: right; line-height: 1.4; }
+  table { width: 100%; border-collapse: collapse; font-size: 12px; }
+  th, td { border-bottom: 1px solid #ccc; padding: 4px 6px; text-align: left; }
+  th { border-bottom: 1.5px solid #000; font-size: 10px; text-transform: uppercase; }
+  .u { width: 60px; } .n { text-align: right; width: 80px; }
+  tfoot td { font-weight: 700; border-top: 1.5px solid #000; border-bottom: none; }
+  .sign { margin-top: 26px; font-size: 11px; }
+  .none { padding: 20mm; font-size: 15px; }
+  .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1; }
+  /* The toolbar is for the screen; paper should carry only the tickets. */
+  @media print { .bar { display: none; } }
+</style></head><body>
+<div class="bar">
+  ${accounts.length} ticket${accounts.length === 1 ? '' : 's'} for ${fmtDate(del_date)} —
+  <button onclick="window.print()">Print</button>
+</div>
+${sheets.length ? sheets.join('') : empty}
+</body></html>`)
+  } catch (e) {
+    res.status(500).send(`<p>Could not build tickets: ${String(e.message)}</p>`)
+  }
+})
+
 // Delivery tickets export — one sheet per account
 app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
   const { del_date, account: acctFilter } = req.query
@@ -1550,6 +1660,19 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       ${acctCond}
       ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
     `, acctVals)
+
+    // A workbook with no worksheets is not a valid xlsx — Excel reports it as
+    // corrupted, which reads as a broken export rather than an empty day. One
+    // sheet saying so is a file that opens and answers the question.
+    if (!accounts.length) {
+      const ws = wb.addWorksheet('No tickets')
+      ws.getCell('A1').value = `No tickets for ${del_date}`
+      ws.getCell('A1').font = { name: 'Arial', size: 12, bold: true }
+      ws.getCell('A2').value = acctFilter
+        ? `No orders for "${acctFilter}" on this date.`
+        : 'No accounts have orders delivering or ordered on this date.'
+      ws.getColumn(1).width = 60
+    }
 
     const wb = new ExcelJS.Workbook()
     wb.creator = 'Bakery Manager'

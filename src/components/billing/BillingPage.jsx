@@ -120,6 +120,16 @@ export default function BillingPage() {
     window.open(`/api/billing/export/${type}?${params}`, '_blank')
   }
 
+  // Printing from the workbook means opening each account's worksheet and
+  // setting up the page for every one. This is the same tickets as one page per
+  // account, with the breaks already in place — respects the account filter, so
+  // the same button prints one or all.
+  function printTickets() {
+    const params = new URLSearchParams({ del_date: genDate })
+    if (exportAcct) params.set('account', exportAcct)
+    window.open(`/api/billing/print/tickets?${params}`, '_blank')
+  }
+
   return (
     <div>
       {/* Top row */}
@@ -143,6 +153,10 @@ export default function BillingPage() {
 
         <input type="text" placeholder="Account (blank = all)…" value={exportAcct} onChange={e => setExportAcct(e.target.value)}
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 160 }} />
+        <button className="btn btn-secondary btn-sm" onClick={printTickets} disabled={!genDate}
+          title={exportAcct ? `Print the ticket for ${exportAcct}` : 'Print every ticket for this date, one per page'}>
+          🖨 Print Tickets{exportAcct ? '' : ' (all)'}
+        </button>
         <button className="btn btn-secondary btn-sm" onClick={() => exportXlsx('tickets')} disabled={!genDate}
           title="Delivery invoices with pricing">
           ⬇ Tickets
