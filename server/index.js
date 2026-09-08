@@ -3041,6 +3041,66 @@ app.get('/api/debug/product-refs', requireAuth, async (req, res) => {
 })
 
 /**
+ * GET /api/debug/order-dupes?date=YYYY-MM-DD
+ *
+ * Duplicate rows in daily_orders — the same account, product and date more than
+ * once. They print as a repeated line on a ticket and are counted twice in every
+ * total built on them.
+ *
+ * The likely cause is the import: it dedupes with ON CONFLICT DO NOTHING, but
+ * the only unique index on daily_orders is partial (order_num IS NOT NULL), so a
+ * row whose order_num is null has no arbiter, never conflicts, and inserts again
+ * on every re-import of the same file.
+ *
+ * Read-only — counts only, deletes nothing.
+ */
+app.get('/api/debug/order-dupes', requireAuth, async (req, res) => {
+  const date = req.query.date || null
+  const KEY = 'account, prod_name, ordr_dt'
+  try {
+    const where = date ? 'WHERE ordr_dt = $1' : ''
+    const vals = date ? [date] : []
+    const [totals, dupes, worst, byDate] = await Promise.all([
+      query(`SELECT COUNT(*)::int AS rows,
+                    COUNT(order_num)::int AS with_order_num,
+                    COUNT(*) FILTER (WHERE order_num IS NULL)::int AS null_order_num
+             FROM daily_orders ${where}`, vals),
+      query(`SELECT COUNT(*)::int AS duplicate_groups, COALESCE(SUM(n - 1), 0)::int AS excess_rows
+             FROM (SELECT COUNT(*) AS n FROM daily_orders ${where}
+                   GROUP BY ${KEY} HAVING COUNT(*) > 1) g`, vals),
+      query(`SELECT account, prod_name, ordr_dt::text, COUNT(*)::int AS copies,
+                    SUM(units)::numeric AS total_units
+             FROM daily_orders ${where}
+             GROUP BY ${KEY} HAVING COUNT(*) > 1
+             ORDER BY COUNT(*) DESC, account LIMIT 20`, vals),
+      query(`SELECT ordr_dt::text AS date, COUNT(*)::int AS rows,
+                    COALESCE(SUM(dup.n - 1), 0)::int AS excess
+             FROM daily_orders o
+             LEFT JOIN (SELECT account a, prod_name p, ordr_dt d, COUNT(*) n
+                        FROM daily_orders GROUP BY 1,2,3 HAVING COUNT(*) > 1) dup
+               ON dup.a = o.account AND dup.p = o.prod_name AND dup.d = o.ordr_dt
+             GROUP BY o.ordr_dt ORDER BY o.ordr_dt DESC LIMIT 15`, []),
+    ])
+    const t = totals.rows[0], d = dupes.rows[0]
+    res.json({
+      date,
+      verdict: d.excess_rows > 0
+        ? `${d.excess_rows} duplicate rows across ${d.duplicate_groups} account/product/date combinations`
+        : 'No duplicate order rows found',
+      totals: t,
+      duplicates: d,
+      worstOffenders: worst.rows,
+      recentDates: byDate.rows,
+      note: 'excess_rows is how many rows would be removed by keeping one of each. '
+          + 'A genuine second order for the same product on the same day is indistinguishable '
+          + 'from a duplicate here, so check the samples before deleting anything.',
+    })
+  } catch (e) {
+    res.status(500).json({ error: e.message })
+  }
+})
+
+/**
  * GET /api/debug/extras-census
  *
  * Is a date's order mix normal, or is `is_extra` over-applied?
