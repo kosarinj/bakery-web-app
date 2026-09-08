@@ -1577,13 +1577,29 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       if (!lines.length) continue
 
       let total = 0
-      const body = lines.map(l => {
+      const priced = lines.map(l => {
         const amt = (parseFloat(l.units) || 0) * (parseFloat(l.wprice) || 0)
         total += amt
-        return `<tr><td class="u">${esc(l.units)}</td><td>${esc(l.prod_name)}</td>` +
-               `<td class="n">${(parseFloat(l.wprice) || 0).toFixed(2)}</td>` +
-               `<td class="n">${amt.toFixed(2)}</td></tr>`
-      }).join('')
+        return { ...l, amt }
+      })
+
+      // Two column sets side by side, as the Excel ticket lays them out — a
+      // day's order for a market runs long, and one column per page turns a
+      // single ticket into three sheets of paper.
+      //
+      // Split down the middle rather than filling the left column to a fixed
+      // depth: an account with six lines should read as three and three, not
+      // as a full left column beside an empty right one.
+      const half = Math.ceil(priced.length / 2)
+      const left = priced.slice(0, half)
+      const right = priced.slice(half)
+      const cell = (l) => l
+        ? `<td class="u">${esc(l.units)}</td><td class="p">${esc(l.prod_name)}</td>` +
+          `<td class="n">${(parseFloat(l.wprice) || 0).toFixed(2)}</td>` +
+          `<td class="n">${l.amt.toFixed(2)}</td>`
+        : '<td class="u"></td><td class="p"></td><td class="n"></td><td class="n"></td>'
+      const body = left.map((l, i) =>
+        `<tr>${cell(l)}<td class="gap"></td>${cell(right[i])}</tr>`).join('')
 
       sheets.push(`
         <section class="ticket">
@@ -1593,10 +1609,14 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
             <div class="bak"><strong>${esc(bakeryName)}</strong><br>${esc(bakeryAddr)}<br>${esc(bakeryPhone)}</div>
           </div>
           <table>
-            <thead><tr><th class="u">Units</th><th>Product</th><th class="n">Price</th><th class="n">Amount</th></tr></thead>
+            <thead><tr>
+              <th class="u">Units</th><th class="p">Product</th><th class="n">Price</th><th class="n">Amount</th>
+              <th class="gap"></th>
+              <th class="u">Units</th><th class="p">Product</th><th class="n">Price</th><th class="n">Amount</th>
+            </tr></thead>
             <tbody>${body}</tbody>
-            <tfoot><tr><td></td><td>Total</td><td></td><td class="n">${total.toFixed(2)}</td></tr></tfoot>
           </table>
+          <div class="foot"><span class="tot">Total ${total.toFixed(2)}</span></div>
           <div class="sign">Received by ______________________________</div>
         </section>`)
     }
@@ -1607,18 +1627,26 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
 <title>Tickets ${fmtDate(del_date)}</title>
 <style>
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #000; }
-  .ticket { padding: 18mm 14mm; page-break-after: always; }
-  .ticket:last-child { page-break-after: auto; }
+  /* Break BEFORE each ticket after the first, rather than after every one: an
+     after-break on the last section leaves a blank final sheet in some
+     browsers, and :last-child does not help when a toolbar precedes them. */
+  .ticket { padding: 14mm 10mm; }
+  .ticket + .ticket { page-break-before: always; break-before: page; }
+  .ticket { page-break-inside: avoid; break-inside: avoid; }
   .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
   .acct { font-size: 19px; font-weight: 700; }
   .date { font-size: 12px; color: #333; margin-top: 2px; }
   .bak { font-size: 10px; text-align: right; line-height: 1.4; }
-  table { width: 100%; border-collapse: collapse; font-size: 12px; }
-  th, td { border-bottom: 1px solid #ccc; padding: 4px 6px; text-align: left; }
-  th { border-bottom: 1.5px solid #000; font-size: 10px; text-transform: uppercase; }
-  .u { width: 60px; } .n { text-align: right; width: 80px; }
-  tfoot td { font-weight: 700; border-top: 1.5px solid #000; border-bottom: none; }
-  .sign { margin-top: 26px; font-size: 11px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
+  th, td { border-bottom: 1px solid #ccc; padding: 3px 5px; text-align: left; }
+  th { border-bottom: 1.5px solid #000; font-size: 9px; text-transform: uppercase; }
+  .u { width: 8%; } .n { text-align: right; width: 11%; }
+  .p { width: 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  /* Spacer between the two column sets, with no rule running through it. */
+  .gap { width: 4%; border-bottom: none !important; }
+  .foot { margin-top: 8px; text-align: right; }
+  .tot { font-weight: 700; font-size: 13px; border-top: 1.5px solid #000; padding-top: 3px; }
+  .sign { margin-top: 22px; font-size: 11px; }
   .none { padding: 20mm; font-size: 15px; }
   .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1; }
   /* The toolbar is for the screen; paper should carry only the tickets. */
