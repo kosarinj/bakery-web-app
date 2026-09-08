@@ -1661,9 +1661,13 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
     `, acctVals)
 
+    const wb = new ExcelJS.Workbook()
+    wb.creator = 'Bakery Manager'
+
     // A workbook with no worksheets is not a valid xlsx — Excel reports it as
     // corrupted, which reads as a broken export rather than an empty day. One
-    // sheet saying so is a file that opens and answers the question.
+    // sheet saying so is a file that opens and answers the question. Must come
+    // after the workbook exists, which is what the first attempt got wrong.
     if (!accounts.length) {
       const ws = wb.addWorksheet('No tickets')
       ws.getCell('A1').value = `No tickets for ${del_date}`
@@ -1673,9 +1677,6 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         : 'No accounts have orders delivering or ordered on this date.'
       ws.getColumn(1).width = 60
     }
-
-    const wb = new ExcelJS.Workbook()
-    wb.creator = 'Bakery Manager'
 
     for (const acct of accounts) {
       // Get line items ordered by prod_group then prod_name
