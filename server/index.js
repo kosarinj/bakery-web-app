@@ -1551,12 +1551,17 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
     const acctCond = acctFilter ? `AND TRIM(o.account) = $2` : ''
     const acctVals = acctFilter ? [del_date, acctFilter] : [del_date]
     const { rows: accounts } = await query(`
-      SELECT DISTINCT TRIM(o.account) AS account, a.route, a.sequence
+      -- GROUP BY, not DISTINCT. accounts.name is the primary key, so "Albany"
+      -- and "Albany " are two legal rows that both match TRIM(o.account) — the
+      -- join then returns two, and DISTINCT keeps both because their route or
+      -- sequence differ. That prints the account's ticket twice.
+      SELECT TRIM(o.account) AS account, MIN(a.route) AS route, MIN(a.sequence) AS sequence
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
       WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
       ${acctCond}
-      ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
+      GROUP BY TRIM(o.account)
+      ORDER BY MIN(a.route) NULLS LAST, MIN(a.sequence) NULLS LAST, TRIM(o.account)
     `, acctVals)
 
     const esc = (v) => String(v ?? '').replace(/[&<>"]/g, c => (
@@ -1576,48 +1581,66 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       `, [del_date, acct.account])
       if (!lines.length) continue
 
-      let total = 0
-      const priced = lines.map(l => {
-        const amt = (parseFloat(l.units) || 0) * (parseFloat(l.wprice) || 0)
-        total += amt
-        return { ...l, amt }
-      })
-
-      // Two column sets side by side, as the Excel ticket lays them out — a
-      // day's order for a market runs long, and one column per page turns a
-      // single ticket into three sheets of paper.
+      // Mirrors the Excel ticket exactly: five columns, group subtotals between
+      // product groups, and a grand total carrying the unit count. The Excel has
+      // a stale comment about a second column set at F-J; nothing writes there,
+      // so it is one set and this matches.
       //
-      // Split down the middle rather than filling the left column to a fixed
-      // depth: an account with six lines should read as three and three, not
-      // as a full left column beside an empty right one.
-      const half = Math.ceil(priced.length / 2)
-      const left = priced.slice(0, half)
-      const right = priced.slice(half)
-      const cell = (l) => l
-        ? `<td class="u">${esc(l.units)}</td><td class="p">${esc(l.prod_name)}</td>` +
-          `<td class="n">${(parseFloat(l.wprice) || 0).toFixed(2)}</td>` +
-          `<td class="n">${l.amt.toFixed(2)}</td>`
-        : '<td class="u"></td><td class="p"></td><td class="n"></td><td class="n"></td>'
-      const body = left.map((l, i) =>
-        `<tr>${cell(l)}<td class="gap"></td>${cell(right[i])}</tr>`).join('')
+      // Units are net of special orders, as the Excel is — a special order is
+      // delivered separately and must not be counted on the account's ticket.
+      let rowsHtml = ''
+      let lastGroup = null, groupSubtot = 0, grandTotal = 0, grandUnits = 0
+      const money = (n) => `$${(n || 0).toFixed(2)}`
+      const subtotalRow = (grp, n) =>
+        `<tr class="sub"><td class="n">${n}</td><td class="grp">── ${esc(grp)} subtotal</td>` +
+        `<td></td><td></td><td></td></tr>`
+
+      for (const line of lines) {
+        const grp = line.prod_group || ''
+        if (lastGroup !== null && grp !== lastGroup) {
+          rowsHtml += subtotalRow(lastGroup, groupSubtot)
+          groupSubtot = 0
+        }
+        const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
+        const wp = parseFloat(line.wprice) || 0
+        const rp = parseFloat(line.rprice) || 0
+        const tot = wp * units
+        rowsHtml += `<tr><td class="n">${units}</td><td>${esc(line.prod_name)}</td>` +
+                    `<td class="n">${money(wp)}</td><td class="n">${money(rp)}</td>` +
+                    `<td class="n">${money(tot)}</td></tr>`
+        groupSubtot += units
+        grandTotal += tot
+        grandUnits += units
+        lastGroup = grp
+      }
+      if (lastGroup !== null) rowsHtml += subtotalRow(lastGroup, groupSubtot)
+
+      const addr1 = bakeryAddr.split(',')[0] || ''
+      const addr2 = bakeryAddr.split(',').slice(1).join(',').trim() || ''
 
       sheets.push(`
         <section class="ticket">
           <div class="head">
-            <div class="who"><div class="acct">${esc(acct.account)}</div>
-              <div class="date">${fmtDate(del_date)}${acct.route ? ` · Route ${esc(acct.route)}` : ''}</div></div>
-            <div class="bak"><strong>${esc(bakeryName)}</strong><br>${esc(bakeryAddr)}<br>${esc(bakeryPhone)}</div>
+            <div class="bak">
+              <div class="binv">${esc(bakeryName)} Invoice</div>
+              <div>${esc(addr1)}</div><div>${esc(addr2)}</div><div>${esc(bakeryPhone)}</div>
+            </div>
+          </div>
+          <div class="who">
+            <div class="date">${fmtDate(del_date)}</div>
+            <div class="acct">${esc(acct.account)}</div>
           </div>
           <table>
             <thead><tr>
-              <th class="u">Units</th><th class="p">Product</th><th class="n">Price</th><th class="n">Amount</th>
-              <th class="gap"></th>
-              <th class="u">Units</th><th class="p">Product</th><th class="n">Price</th><th class="n">Amount</th>
+              <th class="n">Units</th><th>Product</th>
+              <th class="n">Wholesale/Unit</th><th class="n">Retail/Unit</th><th class="n">Total Wholesale</th>
             </tr></thead>
-            <tbody>${body}</tbody>
+            <tbody>${rowsHtml}</tbody>
+            <tfoot><tr>
+              <td class="n">Total&nbsp;&nbsp;#${grandUnits}</td><td></td><td></td><td></td>
+              <td class="n dbl">${money(grandTotal)}</td>
+            </tr></tfoot>
           </table>
-          <div class="foot"><span class="tot">Total ${total.toFixed(2)}</span></div>
-          <div class="sign">Received by ______________________________</div>
         </section>`)
     }
 
@@ -1626,27 +1649,31 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
     res.send(`<!doctype html><html><head><meta charset="utf-8">
 <title>Tickets ${fmtDate(del_date)}</title>
 <style>
+  @page { margin: 12mm; }
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #000; }
-  /* Break BEFORE each ticket after the first, rather than after every one: an
-     after-break on the last section leaves a blank final sheet in some
-     browsers, and :last-child does not help when a toolbar precedes them. */
-  .ticket { padding: 14mm 10mm; }
-  .ticket + .ticket { page-break-before: always; break-before: page; }
-  .ticket { page-break-inside: avoid; break-inside: avoid; }
-  .head { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 10px; }
-  .acct { font-size: 19px; font-weight: 700; }
-  .date { font-size: 12px; color: #333; margin-top: 2px; }
-  .bak { font-size: 10px; text-align: right; line-height: 1.4; }
-  table { width: 100%; border-collapse: collapse; font-size: 11px; table-layout: fixed; }
-  th, td { border-bottom: 1px solid #ccc; padding: 3px 5px; text-align: left; }
-  th { border-bottom: 1.5px solid #000; font-size: 9px; text-transform: uppercase; }
-  .u { width: 8%; } .n { text-align: right; width: 11%; }
-  .p { width: 22%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  /* Spacer between the two column sets, with no rule running through it. */
-  .gap { width: 4%; border-bottom: none !important; }
-  .foot { margin-top: 8px; text-align: right; }
-  .tot { font-weight: 700; font-size: 13px; border-top: 1.5px solid #000; padding-top: 3px; }
-  .sign { margin-top: 22px; font-size: 11px; }
+  /* break-after on every ticket, cleared on the last by :last-of-type — a
+     toolbar div precedes the sections, so :last-child was matching the wrong
+     thing and every run ended with a blank sheet. Both the legacy and modern
+     properties, since browsers still differ on which they honour. */
+  .ticket { padding: 6mm 4mm; page-break-after: always; break-after: page; }
+  .ticket:last-of-type { page-break-after: auto; break-after: auto; }
+  .head { text-align: right; margin-bottom: 6px; }
+  .bak { font-family: Arial; font-size: 8pt; font-weight: 700; line-height: 1.35; }
+  .binv { font-size: 9pt; }
+  .who { margin-bottom: 4px; }
+  .date { font-size: 8pt; }
+  .acct { font-size: 9pt; font-weight: 700; }
+  table { width: 100%; border-collapse: collapse; }
+  th { font-size: 8pt; font-weight: 700; color: #8B0000; border-bottom: 1px solid #000;
+       padding: 2px 4px; text-align: left; }
+  td { font-size: 8pt; padding: 1px 4px; text-align: left; }
+  .n { text-align: right; }
+  th.n { text-align: right; }
+  .sub td { font-size: 8pt; font-style: italic; }
+  .sub .n { font-weight: 700; }
+  .grp { color: #666; }
+  tfoot td { font-size: 10pt; font-weight: 700; border-top: 1px solid #000; padding-top: 3px; }
+  tfoot .dbl { border-top: 3px double #000; }
   .none { padding: 20mm; font-size: 15px; }
   .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1; }
   /* The toolbar is for the screen; paper should carry only the tickets. */
@@ -1681,12 +1708,17 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
     const acctCond = acctFilter ? `AND TRIM(o.account) = $2` : ''
     const acctVals = acctFilter ? [del_date, acctFilter] : [del_date]
     const { rows: accounts } = await query(`
-      SELECT DISTINCT TRIM(o.account) AS account, a.route, a.sequence
+      -- GROUP BY, not DISTINCT. accounts.name is the primary key, so "Albany"
+      -- and "Albany " are two legal rows that both match TRIM(o.account) — the
+      -- join then returns two, and DISTINCT keeps both because their route or
+      -- sequence differ. That prints the account's ticket twice.
+      SELECT TRIM(o.account) AS account, MIN(a.route) AS route, MIN(a.sequence) AS sequence
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
       WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
       ${acctCond}
-      ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
+      GROUP BY TRIM(o.account)
+      ORDER BY MIN(a.route) NULLS LAST, MIN(a.sequence) NULLS LAST, TRIM(o.account)
     `, acctVals)
 
     const wb = new ExcelJS.Workbook()
