@@ -1,4 +1,5 @@
 import { useState, useEffect } from 'react'
+import { rollUp } from './RecipeGrid'
 import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
@@ -212,12 +213,17 @@ export default function RecipeGenerator() {
       if (row.space) return '<div class="sp"></div>'
       if (row.rectext && !row.ingredient) return `<div class="sec">${esc(row.rectext)}</div>`
       const parts = []
-      const lbs = num(row.pounds) * scale, cups = num(row.cups) * scale, tbsp = num(row.tablespoons) * scale, tsp = num(row.teaspoons) * scale, qty = num(row.qty) * scale
-      if (lbs)  parts.push(`${trim(lbs)} lbs.`)
-      if (cups) parts.push(`${trim(cups)} cup(s)`)
-      if (tbsp) parts.push(`${trim(tbsp)} tbsp`)
-      if (tsp)  parts.push(`${trim(tsp)} tsp`)
-      if (qty)  parts.push(`${trim(qty)} ${esc(row.ingr_unit || '')}`.trim())
+      const lbs = num(row.pounds) * scale, qty = num(row.qty) * scale
+      // Rolled up when scaled, as the printed recipe is what someone measures
+      // from — "8 tbsp 4 tsp" is right and unusable.
+      const v = scale === 1
+        ? { cups: num(row.cups), tbsp: num(row.tablespoons), tsp: num(row.teaspoons) }
+        : rollUp(num(row.cups) * scale, num(row.tablespoons) * scale, num(row.teaspoons) * scale)
+      if (lbs)    parts.push(`${trim(lbs)} lbs.`)
+      if (v.cups) parts.push(`${trim(v.cups)} cup(s)`)
+      if (v.tbsp) parts.push(`${trim(v.tbsp)} tbsp`)
+      if (v.tsp)  parts.push(`${trim(v.tsp)} tsp`)
+      if (qty)    parts.push(`${trim(qty)} ${esc(row.ingr_unit || '')}`.trim())
       return `<div class="ing"><span class="nm">${esc(row.ingredient)}:</span> ${parts.join('  ')}</div>`
     }
 

@@ -7,14 +7,43 @@ function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
 function trim(n) { const v = parseFloat(n); return v % 1 === 0 ? String(v) : v.toFixed(2).replace(/\.?0+$/, '') }
 
 // Scale one recipe row by `scale` and return its printable ingredient parts (matches RecipeGenerator).
+/**
+ * Volume re-expressed in the largest sensible measure.
+ *
+ * Scaling multiplies each column on its own, so a recipe calling for 2 tbsp and
+ * 1 tsp at x4 reads "8 tbsp 4 tsp" — correct, and nobody measures that way. The
+ * old program showed the same amount as "0.5 cup(s) 1 tbsp 1 tsp", which is what
+ * you actually reach for.
+ *
+ * Cups go in half-cup steps (8 tbsp = half a cup) because that is the measure
+ * that exists in a kitchen; the remainder falls to tablespoons then teaspoons.
+ * 1 cup = 16 tbsp = 48 tsp.
+ */
+export function rollUp(cups, tbsp, tsp) {
+  const totalTsp = cups * 48 + tbsp * 3 + tsp
+  if (totalTsp <= 0) return { cups: 0, tbsp: 0, tsp: 0 }
+  const halfCups = Math.floor(totalTsp / 24)
+  let rest = totalTsp - halfCups * 24
+  const outTbsp = Math.floor(rest / 3)
+  rest -= outTbsp * 3
+  // Two decimals: a scale factor can leave a third of a teaspoon, and rounding
+  // it away silently loses the ingredient.
+  return { cups: halfCups * 0.5, tbsp: outTbsp, tsp: Math.round(rest * 100) / 100 }
+}
+
 function scaledParts(row, scale) {
   const parts = []
-  const lbs = num(row.pounds) * scale, cups = num(row.cups) * scale, tbsp = num(row.tablespoons) * scale, tsp = num(row.teaspoons) * scale, qty = num(row.qty) * scale
-  if (lbs)  parts.push(`${trim(lbs)} lbs.`)
-  if (cups) parts.push(`${trim(cups)} cup(s)`)
-  if (tbsp) parts.push(`${trim(tbsp)} tbsp`)
-  if (tsp)  parts.push(`${trim(tsp)} tsp`)
-  if (qty)  parts.push(`${trim(qty)} ${row.ingr_unit || row.ingredient_unit || ''}`.trim())
+  const lbs = num(row.pounds) * scale, qty = num(row.qty) * scale
+  // Only when scaled: at 1x the stored breakdown is what someone typed in, and
+  // rewriting it would be changing their recipe rather than helping with it.
+  const v = scale === 1
+    ? { cups: num(row.cups), tbsp: num(row.tablespoons), tsp: num(row.teaspoons) }
+    : rollUp(num(row.cups) * scale, num(row.tablespoons) * scale, num(row.teaspoons) * scale)
+  if (lbs)    parts.push(`${trim(lbs)} lbs.`)
+  if (v.cups) parts.push(`${trim(v.cups)} cup(s)`)
+  if (v.tbsp) parts.push(`${trim(v.tbsp)} tbsp`)
+  if (v.tsp)  parts.push(`${trim(v.tsp)} tsp`)
+  if (qty)    parts.push(`${trim(qty)} ${row.ingr_unit || row.ingredient_unit || ''}`.trim())
   return parts
 }
 
