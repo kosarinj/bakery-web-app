@@ -1572,13 +1572,16 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
     const sheets = []
     for (const acct of accounts) {
       const { rows: lines } = await query(`
-        SELECT o.prod_name, o.units, o.wprice, p.prod_group
+        SELECT o.prod_name, o.units, o.wprice, o.rprice, o.special_ords,
+               p.prod_group, p.prod_type, COALESCE(p.gluten_free, false) AS gluten_free
         FROM daily_orders o
         LEFT JOIN products p ON p.prod_name = o.prod_name
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        ORDER BY p.prod_type NULLS LAST, o.prod_name
+        -- Gluten free last so it lands in its own block at the foot of the
+        -- ticket, the way post_bake.frm pulled it as a separate list.
+        ORDER BY COALESCE(p.gluten_free, false), p.prod_type NULLS LAST, o.prod_name
       `, [del_date, acct.account])
       if (!lines.length) continue
 
@@ -1594,18 +1597,27 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       // reads off a delivery ticket is the one at the bottom.
       let rowsHtml = ''
       let grandTotal = 0, grandUnits = 0
+      let gfSeen = false, gfUnits = 0, gfTotal = 0
       const money = (n) => `$${(n || 0).toFixed(2)}`
 
       for (const line of lines) {
+        // Gluten free is sorted last, so the first one marks the boundary. A
+        // heading rather than a separate table: it stays one ticket with one
+        // total, but nobody packs a GF loaf into the regular order by mistake.
+        if (line.gluten_free && !gfSeen) {
+          gfSeen = true
+          rowsHtml += `<tr class="gfhead"><td colspan="5">Gluten Free</td></tr>`
+        }
         const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
         const wp = parseFloat(line.wprice) || 0
         const rp = parseFloat(line.rprice) || 0
         const tot = wp * units
-        rowsHtml += `<tr><td class="n">${units}</td><td>${esc(line.prod_name)}</td>` +
+        rowsHtml += `<tr${line.gluten_free ? ' class="gf"' : ''}><td class="n">${units}</td><td>${esc(line.prod_name)}</td>` +
                     `<td class="n">${money(wp)}</td><td class="n">${money(rp)}</td>` +
                     `<td class="n">${money(tot)}</td></tr>`
         grandTotal += tot
         grandUnits += units
+        if (line.gluten_free) { gfUnits += units; gfTotal += tot }
       }
 
       const addr1 = bakeryAddr.split(',')[0] || ''
@@ -1641,6 +1653,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
               <td class="n dbl">${money(grandTotal)}</td>
             </tr></tfoot>
           </table>
+          ${gfSeen ? `<div class="gfnote">of which gluten free: ${gfUnits} units · ${money(gfTotal)}</div>` : ''}
           ${acct.balance != null && Number(acct.balance) !== 0
             ? `<div class="bal"><span class="lbl">Outstanding Balance:</span> ${money(Number(acct.balance))}</div>`
             : ''}
@@ -1674,6 +1687,12 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
   tfoot td { font-size: 10pt; font-weight: 700; border-top: 1px solid #000; padding-top: 4px; }
   tfoot .dbl { border-top: 3px double #000; }
   .bal { margin-top: 14px; font-size: 10pt; }
+  /* The boundary has to survive a black-and-white printer, so it is a ruled
+     heading rather than a colour. */
+  .gfhead td { font-weight: 700; font-size: 9pt; text-transform: uppercase;
+               letter-spacing: 0.06em; border-top: 1.5px solid #000;
+               border-bottom: 1px solid #000; padding-top: 7px; }
+  .gfnote { margin-top: 6px; font-size: 9pt; text-align: right; }
   .none { padding: 20mm; font-size: 15px; }
   .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1; }
   /* The toolbar is for the screen; paper should carry only the tickets. */
@@ -1742,13 +1761,15 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       // Get line items ordered by prod_group then prod_name
       const { rows: lines } = await query(`
         SELECT o.prod_name, o.units, o.wprice, o.rprice, o.special_ords,
-               p.prod_group, p.prod_type
+               p.prod_group, p.prod_type, COALESCE(p.gluten_free, false) AS gluten_free
         FROM daily_orders o
         LEFT JOIN products p ON p.prod_name = o.prod_name
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        ORDER BY p.prod_type NULLS LAST, o.prod_name
+        -- Gluten free last so it lands in its own block at the foot of the
+        -- ticket, the way post_bake.frm pulled it as a separate list.
+        ORDER BY COALESCE(p.gluten_free, false), p.prod_type NULLS LAST, o.prod_name
       `, [del_date, acct.account])
 
       const sheetName = acct.account.replace(/[*?:/\\[\]]/g, '').slice(0, 31)
@@ -1796,8 +1817,22 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       let row = 8
       let grandTotal = 0
       let grandUnits = 0
+      let gfSeen = false
 
       for (const line of lines) {
+        // Gluten free sorts last, so the first one marks the boundary. A ruled
+        // heading keeps it one ticket with one total while making the split
+        // impossible to miss when packing.
+        if (line.gluten_free && !gfSeen) {
+          gfSeen = true
+          const gr = ws.getRow(row)
+          gr.getCell(2).value = 'GLUTEN FREE'
+          gr.getCell(2).font = { name: 'Arial', size: 8, bold: true }
+          for (let c = 1; c <= 5; c++) {
+            gr.getCell(c).border = { top: { style: 'medium' }, bottom: { style: 'thin' } }
+          }
+          row++
+        }
         const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
         const wp = parseFloat(line.wprice) || 0
         const rp = parseFloat(line.rprice) || 0
