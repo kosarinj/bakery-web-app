@@ -1555,7 +1555,8 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       -- and "Albany " are two legal rows that both match TRIM(o.account) — the
       -- join then returns two, and DISTINCT keeps both because their route or
       -- sequence differ. That prints the account's ticket twice.
-      SELECT TRIM(o.account) AS account, MIN(a.route) AS route, MIN(a.sequence) AS sequence
+      SELECT TRIM(o.account) AS account, MIN(a.route) AS route, MIN(a.sequence) AS sequence,
+             MIN(a.acct_id) AS acct_id, MIN(a.balance) AS balance
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
       WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
@@ -1577,7 +1578,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        ORDER BY p.prod_group NULLS LAST, o.prod_name
+        ORDER BY p.prod_type NULLS LAST, o.prod_name
       `, [del_date, acct.account])
       if (!lines.length) continue
 
@@ -1588,19 +1589,14 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       //
       // Units are net of special orders, as the Excel is — a special order is
       // delivered separately and must not be counted on the account's ticket.
+      // Straight list, sorted by product type then product name. No group
+      // subtotals: they broke the run of products up and the only total anyone
+      // reads off a delivery ticket is the one at the bottom.
       let rowsHtml = ''
-      let lastGroup = null, groupSubtot = 0, grandTotal = 0, grandUnits = 0
+      let grandTotal = 0, grandUnits = 0
       const money = (n) => `$${(n || 0).toFixed(2)}`
-      const subtotalRow = (grp, n) =>
-        `<tr class="sub"><td class="n">${n}</td><td class="grp">── ${esc(grp)} subtotal</td>` +
-        `<td></td><td></td><td></td></tr>`
 
       for (const line of lines) {
-        const grp = line.prod_group || ''
-        if (lastGroup !== null && grp !== lastGroup) {
-          rowsHtml += subtotalRow(lastGroup, groupSubtot)
-          groupSubtot = 0
-        }
         const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
         const wp = parseFloat(line.wprice) || 0
         const rp = parseFloat(line.rprice) || 0
@@ -1608,39 +1604,46 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         rowsHtml += `<tr><td class="n">${units}</td><td>${esc(line.prod_name)}</td>` +
                     `<td class="n">${money(wp)}</td><td class="n">${money(rp)}</td>` +
                     `<td class="n">${money(tot)}</td></tr>`
-        groupSubtot += units
         grandTotal += tot
         grandUnits += units
-        lastGroup = grp
       }
-      if (lastGroup !== null) rowsHtml += subtotalRow(lastGroup, groupSubtot)
 
       const addr1 = bakeryAddr.split(',')[0] || ''
       const addr2 = bakeryAddr.split(',').slice(1).join(',').trim() || ''
 
+      // Laid out as the VB6 report was: title, a labelled account block
+      // (Account / Acct # / Date / Route / Sequence), the five columns under
+      // their full captions, then totals and the outstanding balance.
+      const field = (label, value) => value === null || value === undefined || value === ''
+        ? '' : `<div><span class="lbl">${label}</span> ${esc(value)}</div>`
+
       sheets.push(`
         <section class="ticket">
-          <div class="head">
-            <div class="bak">
-              <div class="binv">${esc(bakeryName)} Invoice</div>
-              <div>${esc(addr1)}</div><div>${esc(addr2)}</div><div>${esc(bakeryPhone)}</div>
-            </div>
-          </div>
-          <div class="who">
-            <div class="date">${fmtDate(del_date)}</div>
-            <div class="acct">${esc(acct.account)}</div>
+          <div class="title">${esc(bakeryName)} Invoice</div>
+          <div class="sub">${esc(addr1)}${addr2 ? ', ' + esc(addr2) : ''} · ${esc(bakeryPhone)}</div>
+          <div class="acctblock">
+            ${field('Account:', acct.account)}
+            ${field('Acct #:', acct.acct_id)}
+            ${field('Date:', fmtDate(del_date))}
+            ${field('Route:', acct.route)}
+            ${field('Sequence:', acct.sequence)}
           </div>
           <table>
             <thead><tr>
               <th class="n">Units</th><th>Product</th>
-              <th class="n">Wholesale/Unit</th><th class="n">Retail/Unit</th><th class="n">Total Wholesale</th>
+              <th class="n">Wholesale Price<br>Per Unit</th>
+              <th class="n">Retail Price<br>Per Unit</th>
+              <th class="n">Total Wholesale<br>Per Unit</th>
             </tr></thead>
             <tbody>${rowsHtml}</tbody>
             <tfoot><tr>
-              <td class="n">Total&nbsp;&nbsp;#${grandUnits}</td><td></td><td></td><td></td>
+              <td class="n">${grandUnits}</td><td>Total units</td><td></td><td></td>
               <td class="n dbl">${money(grandTotal)}</td>
             </tr></tfoot>
           </table>
+          ${acct.balance != null && Number(acct.balance) !== 0
+            ? `<div class="bal"><span class="lbl">Outstanding Balance:</span> ${money(Number(acct.balance))}</div>`
+            : ''}
         </section>`)
     }
 
@@ -1650,30 +1653,27 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
 <title>Tickets ${fmtDate(del_date)}</title>
 <style>
   @page { margin: 12mm; }
-  body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #000; }
-  /* break-after on every ticket, cleared on the last by :last-of-type — a
-     toolbar div precedes the sections, so :last-child was matching the wrong
-     thing and every run ended with a blank sheet. Both the legacy and modern
-     properties, since browsers still differ on which they honour. */
-  .ticket { padding: 6mm 4mm; page-break-after: always; break-after: page; }
+  /* Book Antiqua as the VB6 report used, with sane fallbacks. */
+  body { font-family: 'Book Antiqua', 'Palatino Linotype', Palatino, Georgia, serif; margin: 0; color: #000; }
+  /* break-after on every ticket, cleared on :last-of-type — a toolbar div
+     precedes the sections, so :last-child matched nothing and every run ended
+     with a blank sheet. Both properties, since browsers differ on which they
+     honour. */
+  .ticket { padding: 4mm; page-break-after: always; break-after: page; }
   .ticket:last-of-type { page-break-after: auto; break-after: auto; }
-  .head { text-align: right; margin-bottom: 6px; }
-  .bak { font-family: Arial; font-size: 8pt; font-weight: 700; line-height: 1.35; }
-  .binv { font-size: 9pt; }
-  .who { margin-bottom: 4px; }
-  .date { font-size: 8pt; }
-  .acct { font-size: 9pt; font-weight: 700; }
+  .title { font-size: 15pt; text-align: center; margin-bottom: 2px; }
+  .sub { font-size: 8pt; text-align: center; color: #333; margin-bottom: 10px; }
+  .acctblock { font-size: 10pt; line-height: 1.45; margin-bottom: 8px; }
+  .lbl { font-weight: 700; display: inline-block; min-width: 72px; }
   table { width: 100%; border-collapse: collapse; }
-  th { font-size: 8pt; font-weight: 700; color: #8B0000; border-bottom: 1px solid #000;
-       padding: 2px 4px; text-align: left; }
-  td { font-size: 8pt; padding: 1px 4px; text-align: left; }
+  th { font-size: 9pt; font-weight: 700; padding: 3px 5px; text-align: left;
+       border-top: 1px solid #000; border-bottom: 1px solid #000; vertical-align: bottom; }
+  td { font-size: 9pt; padding: 2px 5px; text-align: left; }
   .n { text-align: right; }
   th.n { text-align: right; }
-  .sub td { font-size: 8pt; font-style: italic; }
-  .sub .n { font-weight: 700; }
-  .grp { color: #666; }
-  tfoot td { font-size: 10pt; font-weight: 700; border-top: 1px solid #000; padding-top: 3px; }
+  tfoot td { font-size: 10pt; font-weight: 700; border-top: 1px solid #000; padding-top: 4px; }
   tfoot .dbl { border-top: 3px double #000; }
+  .bal { margin-top: 14px; font-size: 10pt; }
   .none { padding: 20mm; font-size: 15px; }
   .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1; }
   /* The toolbar is for the screen; paper should carry only the tickets. */
@@ -1748,7 +1748,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        ORDER BY p.prod_group NULLS LAST, o.prod_name
+        ORDER BY p.prod_type NULLS LAST, o.prod_name
       `, [del_date, acct.account])
 
       const sheetName = acct.account.replace(/[*?:/\\[\]]/g, '').slice(0, 31)
@@ -1790,26 +1790,14 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         c.border = { bottom: { style: 'thin' } }
       })
 
+      // Straight list, sorted by product type then product name. No group
+      // subtotals: they broke the run of products up, and the only total read
+      // off a delivery ticket is the one at the bottom.
       let row = 8
-      let lastGroup = null
-      let groupSubtot = 0
       let grandTotal = 0
       let grandUnits = 0
 
       for (const line of lines) {
-        const grp = line.prod_group || ''
-        if (lastGroup !== null && grp !== lastGroup) {
-          // print group subtotal
-          const sr = ws.getRow(row)
-          sr.getCell(1).value = groupSubtot
-          sr.getCell(1).font = { name: 'Arial', size: 8, bold: true, italic: true }
-          sr.getCell(1).alignment = { horizontal: 'right' }
-          sr.getCell(2).value = `  ── ${lastGroup} subtotal`
-          sr.getCell(2).font = { name: 'Arial', size: 8, italic: true, color: { argb: 'FF666666' } }
-          row++
-          groupSubtot = 0
-        }
-
         const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
         const wp = parseFloat(line.wprice) || 0
         const rp = parseFloat(line.rprice) || 0
@@ -1826,21 +1814,8 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         dr.getCell(5).numFmt = '$#,##0.00'
         dr.eachCell({ includeEmpty: false }, c => { c.font = hdrFont })
 
-        groupSubtot += units
         grandTotal += tot
         grandUnits += units
-        lastGroup = grp
-        row++
-      }
-
-      // Last group subtotal
-      if (lastGroup !== null) {
-        const sr = ws.getRow(row)
-        sr.getCell(1).value = groupSubtot
-        sr.getCell(1).font = { name: 'Arial', size: 8, bold: true, italic: true }
-        sr.getCell(1).alignment = { horizontal: 'right' }
-        sr.getCell(2).value = `  ── ${lastGroup} subtotal`
-        sr.getCell(2).font = { name: 'Arial', size: 8, italic: true, color: { argb: 'FF666666' } }
         row++
       }
 
@@ -2044,7 +2019,9 @@ app.get('/api/billing/export/packing', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        ORDER BY p.prod_group NULLS LAST, o.prod_name
+         -- Packing keeps its prod_group ordering: its subtotals group by that,
+         -- and sorting by type would fire them on the wrong boundaries.
+         ORDER BY p.prod_group NULLS LAST, o.prod_name
       `, [del_date, acct.account])
 
       const sheetName = acct.account.replace(/[*?:/\\[\]]/g, '').slice(0, 31)
