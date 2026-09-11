@@ -6,11 +6,17 @@ export default function SettingsPage() {
   const [saved, setSaved] = useState('')
   const [error, setError] = useState('')
   const [activeTheme, setActiveTheme] = useState(() => localStorage.getItem('bakery-theme') || 'purple')
+  const [ticketOpts, setTicketOpts] = useState(null)
 
   useEffect(() => {
     fetch('/api/settings', { credentials: 'include' })
       .then(r => r.json())
       .then(data => setSettings(s => ({ ...s, ...data })))
+      .catch(() => {})
+    // Labels come from the server so a new sort shows up here without an edit.
+    fetch('/api/billing/ticket-options', { credentials: 'include' })
+      .then(r => r.json())
+      .then(setTicketOpts)
       .catch(() => {})
     applyTheme(localStorage.getItem('bakery-theme') || 'purple')
   }, [])
@@ -93,6 +99,56 @@ export default function SettingsPage() {
               </button>
             </div>
             <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>Default date for Orders, Bake List, and Recipe Generator.</div>
+          </div>
+        </div>
+      </div>
+
+      {/* Delivery Tickets */}
+      <div className="section-card" style={{ marginBottom: 16 }}>
+        <div className="card-header"><h2>Delivery Tickets</h2></div>
+        <div className="card-body" style={{ display: 'flex', flexDirection: 'column', gap: 16 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: -4 }}>
+            How products are listed on printed tickets and the Excel export. A single print
+            run can be re-sorted from the toolbar on the print page without changing these.
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Group By</label>
+            <select className="form-control" value={settings.ticket_group_by || 'prod_type'}
+              onChange={e => saveSetting('ticket_group_by', e.target.value)}>
+              {(ticketOpts?.groups || [{ value: 'prod_type', label: 'Product type' }])
+                .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              Products are listed under a heading for each group.
+              {saved === 'ticket_group_by' && <span style={{ color: 'var(--primary)', fontWeight: 600 }}> ✓ Saved</span>}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Sort Within Each Group</label>
+            <select className="form-control" value={settings.ticket_sort_within || 'name'}
+              onChange={e => saveSetting('ticket_sort_within', e.target.value)}>
+              {(ticketOpts?.sorts || [{ value: 'name', label: 'Name (A–Z)' }])
+                .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              Name sorting ignores capitals, so "apple pie" and "Apple Pie" sort together.
+              {saved === 'ticket_sort_within' && <span style={{ color: 'var(--primary)', fontWeight: 600 }}> ✓ Saved</span>}
+            </div>
+          </div>
+
+          <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Gluten Free</label>
+            <select className="form-control" value={settings.ticket_gf_separate === 'false' ? 'false' : 'true'}
+              onChange={e => saveSetting('ticket_gf_separate', e.target.value)}>
+              <option value="true">Own block at the bottom</option>
+              <option value="false">Mixed in with everything else</option>
+            </select>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              Keeping it separate makes it harder to pack a gluten free item into a regular order.
+              {saved === 'ticket_gf_separate' && <span style={{ color: 'var(--primary)', fontWeight: 600 }}> ✓ Saved</span>}
+            </div>
           </div>
         </div>
       </div>

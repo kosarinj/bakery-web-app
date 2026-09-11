@@ -1523,10 +1523,87 @@ app.get('/api/billing/aged', requireAuth, async (req, res) => {
   }
 })
 
+// ─── Delivery ticket line order ───────────────────────────────────────────
+//
+// Both ticket outputs — the printable page and the Excel workbook — have to
+// list a ticket's products identically, so the ordering is decided here once
+// rather than written out twice and left to drift apart.
+
+const TICKET_GROUPS = {
+  none:       { field: null,           key: null,          label: 'No grouping' },
+  prod_type:  { field: 'p.prod_type',  key: 'prod_type',   label: 'Product type' },
+  prod_group: { field: 'p.prod_group', key: 'prod_group',  label: 'Product group' },
+}
+
+// Net units and line total are repeated here rather than referenced by alias:
+// ORDER BY runs before the select list is projected, so the expression has to
+// stand on its own.
+const TICKET_NET_UNITS = '(COALESCE(o.units,0) - COALESCE(o.special_ords,0))'
+const TICKET_SORTS = {
+  // LOWER, because the default collation puts every capital ahead of every
+  // lowercase letter — "Zucchini Bread" lands before "apple pie", and a list
+  // sorted that way reads as unsorted to anyone scanning down it.
+  name:       { sql: 'LOWER(o.prod_name) ASC', label: 'Name (A–Z)' },
+  units_desc: { sql: `${TICKET_NET_UNITS} DESC, LOWER(o.prod_name) ASC`, label: 'Most units first' },
+  total_desc: { sql: `(COALESCE(o.wprice,0) * ${TICKET_NET_UNITS}) DESC, LOWER(o.prod_name) ASC`,
+                label: 'Largest dollar amount first' },
+}
+
+/**
+ * How one ticket's lines are grouped and sorted.
+ *
+ * The default lives in settings so the office sets it once for everybody; the
+ * query string overrides it for a single run, which is how the toolbar on the
+ * printable page re-sorts a stack without changing anyone's default.
+ */
+function ticketLineOrder(settings = {}, q = {}) {
+  const pick = (table, fromQuery, fromSettings, fallback) =>
+    table[fromQuery] ? fromQuery : (table[fromSettings] ? fromSettings : fallback)
+
+  const groupBy = pick(TICKET_GROUPS, q.group, settings.ticket_group_by, 'prod_type')
+  const sortBy  = pick(TICKET_SORTS,  q.sort,  settings.ticket_sort_within, 'name')
+  // Separating gluten free is on unless explicitly turned off, in either place.
+  const gfSeparate = q.gf != null ? q.gf !== '0' : settings.ticket_gf_separate !== 'false'
+
+  const group = TICKET_GROUPS[groupBy]
+  const parts = []
+  // Gluten free to the foot of the ticket, the way post_bake.frm kept it as a
+  // separate list — so nobody packs a GF loaf into the regular order.
+  if (gfSeparate) parts.push('COALESCE(p.gluten_free, false) ASC')
+  if (group.field) parts.push(`${group.field} ASC NULLS LAST`)
+  parts.push(TICKET_SORTS[sortBy].sql)
+
+  return { groupBy, sortBy, gfSeparate, groupKey: group.key, orderBy: parts.join(', ') }
+}
+
+// The heading a line belongs under, or null when grouping is off. Products with
+// no type fall under "Other" rather than an empty heading.
+const ticketGroupLabel = (line, ord) =>
+  ord.groupKey ? (String(line[ord.groupKey] || '').trim() || 'Other') : null
+
+const TICKET_SETTING_KEYS = `'bakery_name','bakery_address','bakery_phone',`
+  + `'ticket_group_by','ticket_sort_within','ticket_gf_separate'`
+
+/**
+ * GET /api/billing/ticket-options
+ *
+ * The grouping and sorting choices, labelled. Served rather than repeated in
+ * the Settings page so a new sort is added in one place.
+ */
+app.get('/api/billing/ticket-options', requireAuth, (req, res) => {
+  const list = (table) => Object.entries(table).map(([value, v]) => ({ value, label: v.label }))
+  res.json({
+    groups: list(TICKET_GROUPS),
+    sorts: list(TICKET_SORTS),
+    defaults: { group_by: 'prod_type', sort_within: 'name', gf_separate: 'true' },
+  })
+})
+
 // ─── Billing Excel Export ─────────────────────────────────────────────────
 
 /**
  * GET /api/billing/print/tickets?del_date=YYYY-MM-DD&account=
+ *   &group=prod_type|prod_group|none  &sort=name|units_desc|total_desc  &gf=0|1
  *
  * The same tickets as the Excel export, as a printable page — one account per
  * sheet of paper, opened in a tab and printed straight from the browser.
@@ -1542,11 +1619,12 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
   if (!del_date) return res.status(400).send('<p>del_date required</p>')
   try {
     const { rows: sRows } = await query(
-      `SELECT setting, value FROM settings WHERE setting IN ('bakery_name','bakery_address','bakery_phone')`)
+      `SELECT setting, value FROM settings WHERE setting IN (${TICKET_SETTING_KEYS})`)
     const settings = Object.fromEntries(sRows.map(r => [r.setting, r.value]))
     const bakeryName = settings.bakery_name || "Meredith's Country Bakery"
     const bakeryAddr = settings.bakery_address || '415 Rte 28, Kingston, NY 12401'
     const bakeryPhone = settings.bakery_phone || '(845) 331-4318'
+    const ord = ticketLineOrder(settings, req.query)
 
     const acctCond = acctFilter ? `AND TRIM(o.account) = $2` : ''
     const acctVals = acctFilter ? [del_date, acctFilter] : [del_date]
@@ -1579,9 +1657,9 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        -- Gluten free last so it lands in its own block at the foot of the
-        -- ticket, the way post_bake.frm pulled it as a separate list.
-        ORDER BY COALESCE(p.gluten_free, false), p.prod_type NULLS LAST, o.prod_name
+        -- Grouped and sorted per settings, overridable per run. See
+        -- ticketLineOrder: the same clause drives the Excel export.
+        ORDER BY ${ord.orderBy}
       `, [del_date, acct.account])
       if (!lines.length) continue
 
@@ -1592,21 +1670,31 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       //
       // Units are net of special orders, as the Excel is — a special order is
       // delivered separately and must not be counted on the account's ticket.
-      // Straight list, sorted by product type then product name. No group
-      // subtotals: they broke the run of products up and the only total anyone
-      // reads off a delivery ticket is the one at the bottom.
+      // Headings between groups, but still no group subtotals: they broke the
+      // run of products up, and the only total anyone reads off a delivery
+      // ticket is the one at the bottom.
       let rowsHtml = ''
       let grandTotal = 0, grandUnits = 0
       let gfSeen = false, gfUnits = 0, gfTotal = 0
-      const money = (n) => `$${(n || 0).toFixed(2)}`
+      let curGroup = null
+      const money = (n) => `${(n || 0).toFixed(2)}`
 
       for (const line of lines) {
         // Gluten free is sorted last, so the first one marks the boundary. A
         // heading rather than a separate table: it stays one ticket with one
         // total, but nobody packs a GF loaf into the regular order by mistake.
-        if (line.gluten_free && !gfSeen) {
+        if (ord.gfSeparate && line.gluten_free && !gfSeen) {
           gfSeen = true
+          // Headings restart inside the block: the gluten free run carries its
+          // own types, and continuing the count from above would suppress the
+          // first one.
+          curGroup = null
           rowsHtml += `<tr class="gfhead"><td colspan="5">Gluten Free</td></tr>`
+        }
+        const groupLabel = ticketGroupLabel(line, ord)
+        if (groupLabel !== null && groupLabel !== curGroup) {
+          curGroup = groupLabel
+          rowsHtml += `<tr class="grphead"><td colspan="5">${esc(groupLabel)}</td></tr>`
         }
         const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
         const wp = parseFloat(line.wprice) || 0
@@ -1660,6 +1748,12 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         </section>`)
     }
 
+    // Option list for the toolbar selects, labels straight off the tables so
+    // adding a sort does not mean editing the markup too.
+    const sel = (table, current) => Object.entries(table)
+      .map(([k, v]) => `<option value="${k}"${k === current ? ' selected' : ''}>${esc(v.label)}</option>`)
+      .join('')
+
     const empty = `<p class="none">No tickets for ${fmtDate(del_date)}${acctFilter ? ` at ${esc(acctFilter)}` : ''}.</p>`
     res.setHeader('Content-Type', 'text/html; charset=utf-8')
     res.send(`<!doctype html><html><head><meta charset="utf-8">
@@ -1692,15 +1786,40 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
   .gfhead td { font-weight: 700; font-size: 9pt; text-transform: uppercase;
                letter-spacing: 0.06em; border-top: 1.5px solid #000;
                border-bottom: 1px solid #000; padding-top: 7px; }
+  /* Lighter than the gluten free rule: a product type is a heading within the
+     ticket, where gluten free is a break in it. */
+  .grphead td { font-weight: 700; font-size: 8.5pt; text-transform: uppercase;
+                letter-spacing: 0.05em; border-bottom: 0.5px solid #999;
+                padding-top: 6px; }
   .gfnote { margin-top: 6px; font-size: 9pt; text-align: right; }
   .none { padding: 20mm; font-size: 15px; }
-  .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1; }
+  .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1;
+         display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .bar select { font-size: 12px; padding: 2px 4px; }
+  .bar .opts { margin-left: auto; display: flex; align-items: center; gap: 6px; color: #475569; }
   /* The toolbar is for the screen; paper should carry only the tickets. */
   @media print { .bar { display: none; } }
 </style></head><body>
 <div class="bar">
-  ${accounts.length} ticket${accounts.length === 1 ? '' : 's'} for ${fmtDate(del_date)} —
+  <span>${accounts.length} ticket${accounts.length === 1 ? '' : 's'} for ${fmtDate(del_date)}</span>
   <button onclick="window.print()">Print</button>
+  <!-- Changes this stack only. The default for everybody lives in Settings. -->
+  <form class="opts" method="get">
+    <input type="hidden" name="del_date" value="${esc(del_date)}">
+    ${acctFilter ? `<input type="hidden" name="account" value="${esc(acctFilter)}">` : ''}
+    <label>Group
+      <select name="group" onchange="this.form.submit()">${sel(TICKET_GROUPS, ord.groupBy)}</select>
+    </label>
+    <label>Sort
+      <select name="sort" onchange="this.form.submit()">${sel(TICKET_SORTS, ord.sortBy)}</select>
+    </label>
+    <label>Gluten free
+      <select name="gf" onchange="this.form.submit()">
+        <option value="1"${ord.gfSeparate ? ' selected' : ''}>Own block</option>
+        <option value="0"${ord.gfSeparate ? '' : ' selected'}>Mixed in</option>
+      </select>
+    </label>
+  </form>
 </div>
 ${sheets.length ? sheets.join('') : empty}
 </body></html>`)
@@ -1717,11 +1836,12 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
     const ExcelJS = (await import('exceljs')).default
 
     // Load bakery name/address from settings
-    const { rows: sRows } = await query(`SELECT setting, value FROM settings WHERE setting IN ('bakery_name','bakery_address','bakery_phone')`)
+    const { rows: sRows } = await query(`SELECT setting, value FROM settings WHERE setting IN (${TICKET_SETTING_KEYS})`)
     const settings = Object.fromEntries(sRows.map(r => [r.setting, r.value]))
     const bakeryName = settings.bakery_name || "Meredith's Country Bakery"
     const bakeryAddr = settings.bakery_address || '415 Rte 28, Kingston, NY 12401'
     const bakeryPhone = settings.bakery_phone || '(845) 331-4318'
+    const ord = ticketLineOrder(settings, req.query)
 
     // Get accounts for this date ordered by route/sequence
     const acctCond = acctFilter ? `AND TRIM(o.account) = $2` : ''
@@ -1758,7 +1878,8 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
     }
 
     for (const acct of accounts) {
-      // Get line items ordered by prod_group then prod_name
+      // Line items grouped and sorted per settings — the same clause the
+      // printable page uses, so the two outputs cannot disagree.
       const { rows: lines } = await query(`
         SELECT o.prod_name, o.units, o.wprice, o.rprice, o.special_ords,
                p.prod_group, p.prod_type, COALESCE(p.gluten_free, false) AS gluten_free
@@ -1767,9 +1888,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR o.ordr_dt = $1)
           AND TRIM(o.account) = $2
           AND o.units > 0
-        -- Gluten free last so it lands in its own block at the foot of the
-        -- ticket, the way post_bake.frm pulled it as a separate list.
-        ORDER BY COALESCE(p.gluten_free, false), p.prod_type NULLS LAST, o.prod_name
+        ORDER BY ${ord.orderBy}
       `, [del_date, acct.account])
 
       const sheetName = acct.account.replace(/[*?:/\\[\]]/g, '').slice(0, 31)
@@ -1811,26 +1930,38 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         c.border = { bottom: { style: 'thin' } }
       })
 
-      // Straight list, sorted by product type then product name. No group
-      // subtotals: they broke the run of products up, and the only total read
-      // off a delivery ticket is the one at the bottom.
+      // Headings between groups, but still no group subtotals: they broke the
+      // run of products up, and the only total read off a delivery ticket is
+      // the one at the bottom.
       let row = 8
       let grandTotal = 0
       let grandUnits = 0
       let gfSeen = false
+      let curGroup = null
 
       for (const line of lines) {
         // Gluten free sorts last, so the first one marks the boundary. A ruled
         // heading keeps it one ticket with one total while making the split
         // impossible to miss when packing.
-        if (line.gluten_free && !gfSeen) {
+        if (ord.gfSeparate && line.gluten_free && !gfSeen) {
           gfSeen = true
+          // Headings restart inside the block — see the printable page.
+          curGroup = null
           const gr = ws.getRow(row)
           gr.getCell(2).value = 'GLUTEN FREE'
           gr.getCell(2).font = { name: 'Arial', size: 8, bold: true }
           for (let c = 1; c <= 5; c++) {
             gr.getCell(c).border = { top: { style: 'medium' }, bottom: { style: 'thin' } }
           }
+          row++
+        }
+        const groupLabel = ticketGroupLabel(line, ord)
+        if (groupLabel !== null && groupLabel !== curGroup) {
+          curGroup = groupLabel
+          const hr = ws.getRow(row)
+          hr.getCell(2).value = groupLabel.toUpperCase()
+          hr.getCell(2).font = { name: 'Arial', size: 8, bold: true }
+          hr.getCell(2).border = { bottom: { style: 'hair' } }
           row++
         }
         const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
