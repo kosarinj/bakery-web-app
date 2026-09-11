@@ -5,9 +5,19 @@ import { effectiveBakingDate } from '../../lib/bakingDate'
 const fmt$ = v => v != null ? `$${parseFloat(v).toFixed(2)}` : '—'
 const fmtDate = d => { if (!d) return '—'; const s = String(d).slice(0,10); return new Date(s + 'T00:00:00').toLocaleDateString() }
 
+const selStyle = {
+  border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)',
+  padding: '4px 6px', fontSize: 12, marginLeft: 4,
+}
+
 export default function BillingPage() {
   const [view, setView] = useState('tickets')  // 'tickets' | 'aged'
   const [tickets, setTickets] = useState([])
+  // Ticket layout, seeded from the saved default in Settings. Changing it here
+  // affects this screen's prints and exports only — it does not write back, so
+  // one driver's one-off re-sort cannot silently become everyone's default.
+  const [ticketOpts, setTicketOpts] = useState(null)
+  const [layout, setLayout] = useState({ group: 'prod_type', sort: 'name', gf: '1' })
   const [aged, setAged] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -34,6 +44,20 @@ export default function BillingPage() {
         setFrom(monthAgo.toISOString().slice(0, 10))
         setTo(d)
       }).catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    Promise.all([
+      fetch('/api/billing/ticket-options', { credentials: 'include' }).then(r => r.json()),
+      fetch('/api/settings', { credentials: 'include' }).then(r => r.json()),
+    ]).then(([opts, st]) => {
+      setTicketOpts(opts)
+      setLayout({
+        group: st.ticket_group_by || 'prod_type',
+        sort: st.ticket_sort_within || 'name',
+        gf: st.ticket_gf_separate === 'false' ? '0' : '1',
+      })
+    }).catch(() => {})
   }, [])
 
   async function loadTickets() {
@@ -114,10 +138,19 @@ export default function BillingPage() {
   const totalBilled      = tickets.reduce((s, t) => s + parseFloat(t.total || 0), 0)
   const selectedArr      = [...selected]
 
+  // Only the ticket export lists products per account; packing and inventory
+  // are built differently, so the layout does not apply to them.
   function exportXlsx(type) {
     const params = new URLSearchParams({ del_date: genDate })
     if (exportAcct) params.set('account', exportAcct)
+    if (type === 'tickets') addLayout(params)
     window.open(`/api/billing/export/${type}?${params}`, '_blank')
+  }
+
+  function addLayout(params) {
+    params.set('group', layout.group)
+    params.set('sort', layout.sort)
+    params.set('gf', layout.gf)
   }
 
   // Printing from the workbook means opening each account's worksheet and
@@ -127,6 +160,7 @@ export default function BillingPage() {
   function printTickets() {
     const params = new URLSearchParams({ del_date: genDate })
     if (exportAcct) params.set('account', exportAcct)
+    addLayout(params)
     window.open(`/api/billing/print/tickets?${params}`, '_blank')
   }
 
@@ -153,6 +187,30 @@ export default function BillingPage() {
 
         <input type="text" placeholder="Account (blank = all)…" value={exportAcct} onChange={e => setExportAcct(e.target.value)}
           style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 10px', fontSize: 13, width: 160 }} />
+        <label title="How products are listed on tickets. The default is set in Settings → Delivery Tickets.">
+          Group:
+          <select value={layout.group} onChange={e => setLayout(l => ({ ...l, group: e.target.value }))}
+            style={selStyle}>
+            {(ticketOpts?.groups || [{ value: 'prod_type', label: 'Product type' }])
+              .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label title="Order of products within each group.">
+          Sort:
+          <select value={layout.sort} onChange={e => setLayout(l => ({ ...l, sort: e.target.value }))}
+            style={selStyle}>
+            {(ticketOpts?.sorts || [{ value: 'name', label: 'Name (A–Z)' }])
+              .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+          </select>
+        </label>
+        <label title="Whether gluten free products print in their own block at the foot of the ticket.">
+          GF:
+          <select value={layout.gf} onChange={e => setLayout(l => ({ ...l, gf: e.target.value }))}
+            style={selStyle}>
+            <option value="1">Own block</option>
+            <option value="0">Mixed in</option>
+          </select>
+        </label>
         <button className="btn btn-secondary btn-sm" onClick={printTickets} disabled={!genDate}
           title={exportAcct ? `Print the ticket for ${exportAcct}` : 'Print every ticket for this date, one per page'}>
           🖨 Print Tickets{exportAcct ? '' : ' (all)'}
