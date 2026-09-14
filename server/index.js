@@ -8,6 +8,7 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pool, { query } from './db.js'
 import { openMDB, makeTableGetter, getTableInfo, IMPORTERS } from './mdb-import.js'
+import { ticketLayout, writeTicketSheet, ticketTableHtml, TICKET_GRID_CSS } from './ticketLayout.js'
 
 const PgStore = connectPgSimple(session)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1576,11 +1577,6 @@ function ticketLineOrder(settings = {}, q = {}) {
   return { groupBy, sortBy, gfSeparate, groupKey: group.key, orderBy: parts.join(', ') }
 }
 
-// The heading a line belongs under, or null when grouping is off. Products with
-// no type fall under "Other" rather than an empty heading.
-const ticketGroupLabel = (line, ord) =>
-  ord.groupKey ? (String(line[ord.groupKey] || '').trim() || 'Other') : null
-
 const TICKET_SETTING_KEYS = `'bakery_name','bakery_address','bakery_phone',`
   + `'ticket_group_by','ticket_sort_within','ticket_gf_separate'`
 
@@ -1663,88 +1659,16 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
       `, [del_date, acct.account])
       if (!lines.length) continue
 
-      // Mirrors the Excel ticket exactly: five columns, group subtotals between
-      // product groups, and a grand total carrying the unit count. The Excel has
-      // a stale comment about a second column set at F-J; nothing writes there,
-      // so it is one set and this matches.
-      //
-      // Units are net of special orders, as the Excel is — a special order is
-      // delivered separately and must not be counted on the account's ticket.
-      // Headings between groups, but still no group subtotals: they broke the
-      // run of products up, and the only total anyone reads off a delivery
-      // ticket is the one at the bottom.
-      let rowsHtml = ''
-      let grandTotal = 0, grandUnits = 0
-      let gfSeen = false, gfUnits = 0, gfTotal = 0
-      let curGroup = null
-      const money = (n) => `${(n || 0).toFixed(2)}`
-
-      for (const line of lines) {
-        // Gluten free is sorted last, so the first one marks the boundary. A
-        // heading rather than a separate table: it stays one ticket with one
-        // total, but nobody packs a GF loaf into the regular order by mistake.
-        if (ord.gfSeparate && line.gluten_free && !gfSeen) {
-          gfSeen = true
-          // Headings restart inside the block: the gluten free run carries its
-          // own types, and continuing the count from above would suppress the
-          // first one.
-          curGroup = null
-          rowsHtml += `<tr class="gfhead"><td colspan="5">Gluten Free</td></tr>`
-        }
-        const groupLabel = ticketGroupLabel(line, ord)
-        if (groupLabel !== null && groupLabel !== curGroup) {
-          curGroup = groupLabel
-          rowsHtml += `<tr class="grphead"><td colspan="5">${esc(groupLabel)}</td></tr>`
-        }
-        const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
-        const wp = parseFloat(line.wprice) || 0
-        const rp = parseFloat(line.rprice) || 0
-        const tot = wp * units
-        rowsHtml += `<tr${line.gluten_free ? ' class="gf"' : ''}><td class="n">${units}</td><td>${esc(line.prod_name)}</td>` +
-                    `<td class="n">${money(wp)}</td><td class="n">${money(rp)}</td>` +
-                    `<td class="n">${money(tot)}</td></tr>`
-        grandTotal += tot
-        grandUnits += units
-        if (line.gluten_free) { gfUnits += units; gfTotal += tot }
-      }
-
-      const addr1 = bakeryAddr.split(',')[0] || ''
-      const addr2 = bakeryAddr.split(',').slice(1).join(',').trim() || ''
-
-      // Laid out as the VB6 report was: title, a labelled account block
-      // (Account / Acct # / Date / Route / Sequence), the five columns under
-      // their full captions, then totals and the outstanding balance.
-      const field = (label, value) => value === null || value === undefined || value === ''
-        ? '' : `<div><span class="lbl">${label}</span> ${esc(value)}</div>`
-
+      // The office's two-column paper ticket, laid out in ticketLayout.js — the
+      // same layout the Excel export writes, so the two can't disagree.
+      const layout = ticketLayout(lines, ord)
+      const bal = acct.balance != null && Number(acct.balance) !== 0
+        ? `<div class="bal"><span class="lbl">Outstanding Balance:</span> ${Number(acct.balance).toFixed(2)}</div>`
+        : ''
       sheets.push(`
         <section class="ticket">
-          <div class="title">${esc(bakeryName)} Invoice</div>
-          <div class="sub">${esc(addr1)}${addr2 ? ', ' + esc(addr2) : ''} · ${esc(bakeryPhone)}</div>
-          <div class="acctblock">
-            ${field('Account:', acct.account)}
-            ${field('Acct #:', acct.acct_id)}
-            ${field('Date:', fmtDate(del_date))}
-            ${field('Route:', acct.route)}
-            ${field('Sequence:', acct.sequence)}
-          </div>
-          <table>
-            <thead><tr>
-              <th class="n">Units</th><th>Product</th>
-              <th class="n">Wholesale Price<br>Per Unit</th>
-              <th class="n">Retail Price<br>Per Unit</th>
-              <th class="n">Total Wholesale<br>Per Unit</th>
-            </tr></thead>
-            <tbody>${rowsHtml}</tbody>
-            <tfoot><tr>
-              <td class="n">${grandUnits}</td><td>Total units</td><td></td><td></td>
-              <td class="n dbl">${money(grandTotal)}</td>
-            </tr></tfoot>
-          </table>
-          ${gfSeen ? `<div class="gfnote">of which gluten free: ${gfUnits} units · ${money(gfTotal)}</div>` : ''}
-          ${acct.balance != null && Number(acct.balance) !== 0
-            ? `<div class="bal"><span class="lbl">Outstanding Balance:</span> ${money(Number(acct.balance))}</div>`
-            : ''}
+          ${ticketTableHtml({ account: acct.account, del_date, layout, esc })}
+          ${bal}
         </section>`)
     }
 
@@ -1760,38 +1684,16 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
 <title>Tickets ${fmtDate(del_date)}</title>
 <style>
   @page { margin: 12mm; }
-  /* Book Antiqua as the VB6 report used, with sane fallbacks. */
-  body { font-family: 'Book Antiqua', 'Palatino Linotype', Palatino, Georgia, serif; margin: 0; color: #000; }
+  body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #000; }
   /* break-after on every ticket, cleared on :last-of-type — a toolbar div
      precedes the sections, so :last-child matched nothing and every run ended
      with a blank sheet. Both properties, since browsers differ on which they
      honour. */
   .ticket { padding: 4mm; page-break-after: always; break-after: page; }
   .ticket:last-of-type { page-break-after: auto; break-after: auto; }
-  .title { font-size: 15pt; text-align: center; margin-bottom: 2px; }
-  .sub { font-size: 8pt; text-align: center; color: #333; margin-bottom: 10px; }
-  .acctblock { font-size: 10pt; line-height: 1.45; margin-bottom: 8px; }
-  .lbl { font-weight: 700; display: inline-block; min-width: 72px; }
-  table { width: 100%; border-collapse: collapse; }
-  th { font-size: 9pt; font-weight: 700; padding: 3px 5px; text-align: left;
-       border-top: 1px solid #000; border-bottom: 1px solid #000; vertical-align: bottom; }
-  td { font-size: 9pt; padding: 2px 5px; text-align: left; }
-  .n { text-align: right; }
-  th.n { text-align: right; }
-  tfoot td { font-size: 10pt; font-weight: 700; border-top: 1px solid #000; padding-top: 4px; }
-  tfoot .dbl { border-top: 3px double #000; }
-  .bal { margin-top: 14px; font-size: 10pt; }
-  /* The boundary has to survive a black-and-white printer, so it is a ruled
-     heading rather than a colour. */
-  .gfhead td { font-weight: 700; font-size: 9pt; text-transform: uppercase;
-               letter-spacing: 0.06em; border-top: 1.5px solid #000;
-               border-bottom: 1px solid #000; padding-top: 7px; }
-  /* Lighter than the gluten free rule: a product type is a heading within the
-     ticket, where gluten free is a break in it. */
-  .grphead td { font-weight: 700; font-size: 8.5pt; text-transform: uppercase;
-                letter-spacing: 0.05em; border-bottom: 0.5px solid #999;
-                padding-top: 6px; }
-  .gfnote { margin-top: 6px; font-size: 9pt; text-align: right; }
+  .lbl { font-weight: 700; }
+  .bal { margin-top: 12px; font-size: 10pt; text-align: right; }
+  ${TICKET_GRID_CSS}
   .none { padding: 20mm; font-size: 15px; }
   .bar { padding: 10px 14mm; background: #f1f5f9; font-size: 13px; border-bottom: 1px solid #cbd5e1;
          display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
@@ -1894,106 +1796,9 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       const sheetName = acct.account.replace(/[*?:/\\[\]]/g, '').slice(0, 31)
       const ws = wb.addWorksheet(sheetName)
 
-      // Column widths (A=6, B=22, C=12, D=12, E=14, cols F-J = second column set)
-      ws.getColumn(1).width = 7
-      ws.getColumn(2).width = 22
-      ws.getColumn(3).width = 13
-      ws.getColumn(4).width = 13
-      ws.getColumn(5).width = 16
-
-      const hdrFont = { name: 'Arial', size: 8, bold: true }
-
-      // Header block (rows 1-4, col E)
-      ws.getCell('E1').value = bakeryName + ' Invoice'
-      ws.getCell('E2').value = bakeryAddr.split(',')[0] || '415 Rte 28'
-      ws.getCell('E3').value = bakeryAddr.split(',').slice(1).join(',').trim() || 'Kingston, NY 12401'
-      ws.getCell('E4').value = bakeryPhone
-      ws.getCell('E1').font = { name: 'Arial', size: 9, bold: true }
-      ws.getCell('E2').font = hdrFont; ws.getCell('E3').font = hdrFont; ws.getCell('E4').font = hdrFont
-
-      // Date and account (rows 5-6, col A)
-      ws.getCell('A5').value = del_date
-      ws.getCell('A5').numFmt = 'm/d/yyyy'
-      ws.getCell('A5').alignment = { horizontal: 'left' }
-      ws.getCell('A6').value = acct.account
-      ws.getCell('A6').font = { name: 'Arial', size: 9, bold: true }
-
-      // Column headers row 7
-      const hdrRow = ws.getRow(7)
-      hdrRow.getCell(1).value = 'Units'
-      hdrRow.getCell(2).value = 'Product'
-      hdrRow.getCell(3).value = 'Wholesale/Unit'
-      hdrRow.getCell(4).value = 'Retail/Unit'
-      hdrRow.getCell(5).value = 'Total Wholesale'
-      hdrRow.eachCell(c => {
-        c.font = { name: 'Arial', size: 8, bold: true, color: { argb: 'FF8B0000' } }
-        c.border = { bottom: { style: 'thin' } }
-      })
-
-      // Headings between groups, but still no group subtotals: they broke the
-      // run of products up, and the only total read off a delivery ticket is
-      // the one at the bottom.
-      let row = 8
-      let grandTotal = 0
-      let grandUnits = 0
-      let gfSeen = false
-      let curGroup = null
-
-      for (const line of lines) {
-        // Gluten free sorts last, so the first one marks the boundary. A ruled
-        // heading keeps it one ticket with one total while making the split
-        // impossible to miss when packing.
-        if (ord.gfSeparate && line.gluten_free && !gfSeen) {
-          gfSeen = true
-          // Headings restart inside the block — see the printable page.
-          curGroup = null
-          const gr = ws.getRow(row)
-          gr.getCell(2).value = 'GLUTEN FREE'
-          gr.getCell(2).font = { name: 'Arial', size: 8, bold: true }
-          for (let c = 1; c <= 5; c++) {
-            gr.getCell(c).border = { top: { style: 'medium' }, bottom: { style: 'thin' } }
-          }
-          row++
-        }
-        const groupLabel = ticketGroupLabel(line, ord)
-        if (groupLabel !== null && groupLabel !== curGroup) {
-          curGroup = groupLabel
-          const hr = ws.getRow(row)
-          hr.getCell(2).value = groupLabel.toUpperCase()
-          hr.getCell(2).font = { name: 'Arial', size: 8, bold: true }
-          hr.getCell(2).border = { bottom: { style: 'hair' } }
-          row++
-        }
-        const units = (parseFloat(line.units) || 0) - (parseFloat(line.special_ords) || 0)
-        const wp = parseFloat(line.wprice) || 0
-        const rp = parseFloat(line.rprice) || 0
-        const tot = wp * units
-
-        const dr = ws.getRow(row)
-        dr.getCell(1).value = units
-        dr.getCell(2).value = line.prod_name
-        dr.getCell(3).value = wp
-        dr.getCell(4).value = rp
-        dr.getCell(5).value = tot
-        dr.getCell(3).numFmt = '$#,##0.00'
-        dr.getCell(4).numFmt = '$#,##0.00'
-        dr.getCell(5).numFmt = '$#,##0.00'
-        dr.eachCell({ includeEmpty: false }, c => { c.font = hdrFont })
-
-        grandTotal += tot
-        grandUnits += units
-        row++
-      }
-
-      // Grand total row
-      row++
-      const tr = ws.getRow(row)
-      tr.getCell(1).value = `Total   #${grandUnits}`
-      tr.getCell(5).value = grandTotal
-      tr.getCell(5).numFmt = '$#,###,##0.00'
-      tr.eachCell({ includeEmpty: false }, c => { c.font = { name: 'Arial', size: 10, bold: true } })
-      tr.getCell(1).border = { top: { style: 'thin' } }
-      tr.getCell(5).border = { top: { style: 'double' } }
+      // The office's two-column paper ticket — see ticketLayout.js, which the
+      // printable page renders from too.
+      writeTicketSheet(ws, { account: acct.account, del_date, layout: ticketLayout(lines, ord) })
     }
 
     const filename = `tickets_${del_date}${acctFilter ? '_' + acctFilter.replace(/\s+/g, '_') : ''}.xlsx`
