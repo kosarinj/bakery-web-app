@@ -1417,14 +1417,20 @@ app.post('/api/billing/generate', requireAuth, async (req, res) => {
   const { del_date } = req.body
   if (!del_date) return res.status(400).json({ error: 'del_date required' })
   try {
-    // Compute totals per account for that delivery date
+    // Compute totals per account for that delivery date.
+    //
+    // A row belongs to its delivery date, and to its order date only when it has
+    // no delivery date. "ordered OR delivers" put a next-day (postord) account's
+    // products on the ticket twice — yesterday's order delivering today, and
+    // today's order delivering tomorrow — and billed both. Every ticket, packing,
+    // inventory and lead query uses this same condition.
     const { rows: totals } = await query(`
       SELECT o.account,
              SUM(o.wprice * o.units) AS total,
              SUM(o.units)            AS total_units,
              COUNT(*)                AS line_items
       FROM daily_orders o
-      WHERE o.del_date = $1 OR o.ordr_dt = $1
+      WHERE o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)
       GROUP BY o.account
       ORDER BY o.account
     `, [del_date])
@@ -1633,7 +1639,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
              MIN(a.acct_id) AS acct_id, MIN(a.balance) AS balance
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
-      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
       ${acctCond}
       GROUP BY TRIM(o.account)
       ORDER BY MIN(a.route) NULLS LAST, MIN(a.sequence) NULLS LAST, TRIM(o.account)
@@ -1650,7 +1656,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
                p.prod_group, p.prod_type, COALESCE(p.gluten_free, false) AS gluten_free
         FROM daily_orders o
         LEFT JOIN products p ON p.prod_name = o.prod_name
-        WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+        WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
           AND TRIM(o.account) = $2
           AND o.units > 0
         -- Grouped and sorted per settings, overridable per run. See
@@ -1756,7 +1762,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       SELECT TRIM(o.account) AS account, MIN(a.route) AS route, MIN(a.sequence) AS sequence
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
-      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
       ${acctCond}
       GROUP BY TRIM(o.account)
       ORDER BY MIN(a.route) NULLS LAST, MIN(a.sequence) NULLS LAST, TRIM(o.account)
@@ -1787,7 +1793,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
                p.prod_group, p.prod_type, COALESCE(p.gluten_free, false) AS gluten_free
         FROM daily_orders o
         LEFT JOIN products p ON p.prod_name = o.prod_name
-        WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+        WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
           AND TRIM(o.account) = $2
           AND o.units > 0
         ORDER BY ${ord.orderBy}
@@ -1830,7 +1836,7 @@ app.get('/api/billing/export/inventory', requireAuth, async (req, res) => {
       SELECT DISTINCT TRIM(o.account) AS account, a.route, a.sequence, a.category
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
-      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
       ${acctCond}
       ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
     `, acctVals)
@@ -1844,7 +1850,7 @@ app.get('/api/billing/export/inventory', requireAuth, async (req, res) => {
         SELECT DISTINCT COALESCE(p.prod_group, p.prod_type, 'Other') AS grp_key
         FROM daily_orders o
         JOIN products p ON p.prod_name = o.prod_name
-        WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+        WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
           AND TRIM(o.account) = $2
           AND o.units > 0
         ORDER BY grp_key
@@ -1895,7 +1901,7 @@ app.get('/api/billing/export/inventory', requireAuth, async (req, res) => {
           FROM daily_orders o
           LEFT JOIN products p ON p.prod_name = o.prod_name
           LEFT JOIN prices pr ON pr.prod_name = o.prod_name AND pr.category = $3
-          WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+          WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
             AND TRIM(o.account) = $2
             AND COALESCE(p.prod_group, p.prod_type, 'Other') = $4
             AND o.units > 0
@@ -1973,7 +1979,7 @@ app.get('/api/billing/export/packing', requireAuth, async (req, res) => {
       SELECT DISTINCT TRIM(o.account) AS account, a.route, a.sequence, a.acctgrp
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
-      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
       ${acctCond}
       ORDER BY a.route NULLS LAST, a.sequence NULLS LAST, TRIM(o.account)
     `, acctVals)
@@ -1987,7 +1993,7 @@ app.get('/api/billing/export/packing', requireAuth, async (req, res) => {
         SELECT o.prod_name, o.units, o.wprice, o.rprice, o.special_ords, p.prod_group
         FROM daily_orders o
         LEFT JOIN products p ON p.prod_name = o.prod_name
-        WHERE (o.del_date = $1 OR o.ordr_dt = $1)
+        WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
           AND TRIM(o.account) = $2
           AND o.units > 0
          -- Packing keeps its prod_group ordering: its subtotals group by that,
@@ -2088,7 +2094,7 @@ app.get('/api/billing/export/lead', requireAuth, async (req, res) => {
              COALESCE(a.sequence, 9999) AS sequence
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
-      WHERE (o.del_date = $1 OR o.ordr_dt = $1) AND o.units > 0
+      WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
       ORDER BY COALESCE(a.route, 'No Route'), COALESCE(a.sequence, 9999), TRIM(o.account)
     `, [del_date])
 
