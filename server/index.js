@@ -804,7 +804,13 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
   try {
     const { rows } = await query(`
       INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, del_date, last_update)
-      SELECT f.prod_name, f.account,
+      -- One row per account and product. Without DISTINCT ON, a source day that
+      -- already held duplicate rows was copied duplicates and all, so every
+      -- repeat carried them into the next week — Columbia's 9/16 order had 16
+      -- identical rows of each product, printed 16 times on the ticket. Where
+      -- the copies disagree, the Orders grid edited one of them, so the most
+      -- recently updated row is the one someone meant.
+      SELECT DISTINCT ON (TRIM(f.account), f.prod_name) f.prod_name, f.account,
              ${scaledUnits} AS units,
              f.wprice, f.rprice,
              $2::date,
@@ -828,6 +834,7 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
             AND e.account = f.account
             AND e.ordr_dt = $2::date
         )
+      ORDER BY TRIM(f.account), f.prod_name, f.last_update DESC NULLS LAST, f.id DESC
       RETURNING *
     `, params)
     const pctNote = pctAccounts.length ? ` (${pctAccounts.length} account % adjustments)` : ''
