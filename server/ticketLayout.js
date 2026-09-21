@@ -13,8 +13,11 @@ export const ticketGroupLabel = (line, ord) =>
 
 const round2 = (n) => Math.round((Number(n) || 0) * 100) / 100
 
-// 13.5 rather than 13.50, as the paper ticket prints it.
+// 13.5 rather than 13.50, as the paper ticket prints it — for counts.
 const num = (n) => String(round2(n))
+// Dollar amounts carry the sign and both cents digits: $13.50.
+const money = (n) => `$${round2(n).toFixed(2)}`
+const MONEY_FMT = '"$"#,##0.00'
 
 /**
  * Lines (already sorted by ticketLineOrder) → { regular, gf, units, total },
@@ -104,19 +107,26 @@ function flatten(groups) {
 const HEADINGS = ['Units', 'Pack', 'Product', 'Cost', 'Retail', 'Total']
 
 /** One account's ticket onto an ExcelJS worksheet. */
-export function writeTicketSheet(ws, { account, del_date, layout }) {
+export function writeTicketSheet(ws, { bakery, account, del_date, layout }) {
   // A–F left column, G a gutter, H–M right column.
   ;[5, 5, 22, 7, 7, 8, 2, 5, 5, 22, 7, 7, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w })
   Object.assign(ws.pageSetup, {
     orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
     margins: { left: 0.5, right: 0.25, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
-    // Date, account and column headings on every printed page.
-    printTitlesRow: '3:5',
+    // Bakery name, date, account and column headings on every printed page.
+    printTitlesRow: '1:5',
   })
 
   const font = (size, bold = true) => ({ name: 'Arial', size, bold })
   const L = 1, R = 8   // first column of each half
 
+  if (bakery) {
+    ws.mergeCells('A1:M1')
+    ws.getCell('A1').value = bakery
+    ws.getCell('A1').font = font(14)
+    ws.getCell('A1').alignment = { horizontal: 'center' }
+    ws.getRow(1).height = 18
+  }
   ws.mergeCells('A3:F3')
   ws.getCell('A3').value = del_date
   ws.getCell('A3').font = font(11, false)
@@ -151,6 +161,7 @@ export function writeTicketSheet(ws, { account, del_date, layout }) {
       c.value = v
       c.font = font(8)
       if (i !== 2) c.alignment = { horizontal: 'center' }
+      if (i >= 3) c.numFmt = MONEY_FMT
     })
   }
 
@@ -183,18 +194,19 @@ export function writeTicketSheet(ws, { account, del_date, layout }) {
   const tv = ws.getCell(row, R + 3)
   tv.value = layout.total
   tv.font = font(10)
+  tv.numFmt = MONEY_FMT
   tv.alignment = { horizontal: 'center' }
   tv.border = { top: { style: 'double' } }
 }
 
 /** One account's ticket as an HTML table, for the printable page. */
-export function ticketTableHtml({ account, del_date, layout, esc }) {
+export function ticketTableHtml({ bakery, account, del_date, layout, esc }) {
   const cells = (item) => {
     if (!item || item.kind === 'blank') return '<td colspan="6">&nbsp;</td>'
     if (item.kind === 'head') return `<td colspan="2"></td><td class="grp" colspan="4">${esc(item.label)}</td>`
     return `<td class="c">${num(item.units)}</td><td class="c">${num(item.pack)}</td>` +
-      `<td>${esc(item.name)}</td><td class="c">${num(item.cost)}</td>` +
-      `<td class="c">${num(item.retail)}</td><td class="c">${num(item.total)}</td>`
+      `<td>${esc(item.name)}</td><td class="c">${money(item.cost)}</td>` +
+      `<td class="c">${money(item.retail)}</td><td class="c">${money(item.total)}</td>`
   }
   const rows = ({ left, right }) =>
     Array.from({ length: Math.max(left.length, right.length) },
@@ -210,6 +222,7 @@ export function ticketTableHtml({ account, del_date, layout, esc }) {
     <table class="grid">
       <colgroup>${col}<col style="width:2%">${col}</colgroup>
       <thead>
+        ${bakery ? `<tr><th colspan="13" class="bakery">${esc(bakery)}</th></tr>` : ''}
         <tr><th colspan="13" class="date">${esc(del_date)}</th></tr>
         <tr><th colspan="13" class="acct">${esc(account)}</th></tr>
         <tr class="cols">${half}<th class="gap"></th>${half}</tr>
@@ -224,7 +237,7 @@ export function ticketTableHtml({ account, del_date, layout, esc }) {
         <tr class="total">
           <td colspan="7"></td>
           <td colspan="3">Total &nbsp; #${num(layout.units)}</td>
-          <td colspan="3" class="tv">${num(layout.total)}</td>
+          <td colspan="3" class="tv">${money(layout.total)}</td>
         </tr>
       </tbody>
     </table>`
@@ -234,6 +247,7 @@ export const TICKET_GRID_CSS = `
   table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
   .grid th, .grid td { font-size: 8pt; font-weight: 700; padding: 1px 3px; text-align: left;
                        overflow-wrap: anywhere; }
+  .grid .bakery { font-size: 14pt; text-align: center; }
   .grid .date { font-size: 11pt; font-weight: 400; text-align: center; }
   .grid .acct { font-size: 14pt; text-align: center; padding-bottom: 4px; }
   .grid .cols th { border-top: 1px solid #000; border-bottom: 1px solid #000; text-align: center; }

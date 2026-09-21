@@ -1701,7 +1701,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         : ''
       sheets.push(`
         <section class="ticket">
-          ${ticketTableHtml({ account: acct.account, del_date, layout, esc })}
+          ${ticketTableHtml({ bakery: bakeryName, account: acct.account, del_date, layout, esc })}
           ${bal}
         </section>`)
     }
@@ -1835,7 +1835,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
 
       // The office's two-column paper ticket — see ticketLayout.js, which the
       // printable page renders from too.
-      writeTicketSheet(ws, { account: acct.account, del_date, layout: ticketLayout(lines, ord) })
+      writeTicketSheet(ws, { bakery: bakeryName, account: acct.account, del_date, layout: ticketLayout(lines, ord) })
     }
 
     const filename = `tickets_${del_date}${acctFilter ? '_' + acctFilter.replace(/\s+/g, '_') : ''}.xlsx`
