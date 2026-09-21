@@ -1609,6 +1609,13 @@ function ticketLineOrder(settings = {}, q = {}) {
   return { groupBy, sortBy, groupOrder, gfSeparate, groupKey: group.key, orderBy: parts.join(', ') }
 }
 
+// Extras (products flagged is_extra) print only on wholesale tickets — every
+// account whose price category mentions wholesale ("wholesale", "26%WHOLESALE",
+// "WHOLESALE 25%"). Markets and retail leave them off. Applied to the account
+// list too, so an account with nothing but extras gets no blank ticket.
+const TICKET_EXTRAS_COND = `(NOT COALESCE(p.is_extra, false) OR EXISTS (
+  SELECT 1 FROM accounts wa WHERE TRIM(wa.name) = TRIM(o.account) AND wa.category ILIKE '%wholesale%'))`
+
 const TICKET_SETTING_KEYS = `'bakery_name','bakery_address','bakery_phone',`
   + `'ticket_group_by','ticket_group_order','ticket_sort_within','ticket_gf_separate'`
 
@@ -1667,7 +1674,9 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
              MIN(a.acct_id) AS acct_id, MIN(a.balance) AS balance
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
+      LEFT JOIN products p ON p.prod_name = o.prod_name
       WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
+        AND ${TICKET_EXTRAS_COND}
       ${acctCond}
       GROUP BY TRIM(o.account)
       ORDER BY MIN(a.route) NULLS LAST, MIN(a.sequence) NULLS LAST, TRIM(o.account)
@@ -1687,6 +1696,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
           AND TRIM(o.account) = $2
           AND o.units > 0
+          AND ${TICKET_EXTRAS_COND}
         -- Grouped and sorted per settings, overridable per run. See
         -- ticketLineOrder: the same clause drives the Excel export.
         ORDER BY ${ord.orderBy}
@@ -1793,7 +1803,9 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
       SELECT TRIM(o.account) AS account, MIN(a.route) AS route, MIN(a.sequence) AS sequence
       FROM daily_orders o
       LEFT JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
+      LEFT JOIN products p ON p.prod_name = o.prod_name
       WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1)) AND o.units > 0
+        AND ${TICKET_EXTRAS_COND}
       ${acctCond}
       GROUP BY TRIM(o.account)
       ORDER BY MIN(a.route) NULLS LAST, MIN(a.sequence) NULLS LAST, TRIM(o.account)
@@ -1827,6 +1839,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
         WHERE (o.del_date = $1 OR (o.del_date IS NULL AND o.ordr_dt = $1))
           AND TRIM(o.account) = $2
           AND o.units > 0
+          AND ${TICKET_EXTRAS_COND}
         ORDER BY ${ord.orderBy}
       `, [del_date, acct.account])
 
