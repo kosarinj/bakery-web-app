@@ -17,7 +17,7 @@ export default function BillingPage() {
   // affects this screen's prints and exports only — it does not write back, so
   // one driver's one-off re-sort cannot silently become everyone's default.
   const [ticketOpts, setTicketOpts] = useState(null)
-  const [layout, setLayout] = useState({ group: 'prod_type', sort: 'name', gf: '1' })
+  const [layout, setLayout] = useState({ group: 'prod_type', gorder: 'az', sort: 'name', gf: '1' })
   const [aged, setAged] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState('')
@@ -54,6 +54,7 @@ export default function BillingPage() {
       setTicketOpts(opts)
       setLayout({
         group: st.ticket_group_by || 'prod_type',
+        gorder: st.ticket_group_order || 'az',
         sort: st.ticket_sort_within || 'name',
         gf: st.ticket_gf_separate === 'false' ? '0' : '1',
       })
@@ -149,6 +150,7 @@ export default function BillingPage() {
 
   function addLayout(params) {
     params.set('group', layout.group)
+    params.set('gorder', layout.gorder)
     params.set('sort', layout.sort)
     params.set('gf', layout.gf)
   }
@@ -195,6 +197,16 @@ export default function BillingPage() {
               .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
           </select>
         </label>
+        {layout.group !== 'none' && (
+          <label title="Order of the group headings on the ticket.">
+            Group order:
+            <select value={layout.gorder} onChange={e => setLayout(l => ({ ...l, gorder: e.target.value }))}
+              style={selStyle}>
+              {(ticketOpts?.group_orders || [{ value: 'az', label: 'A–Z' }])
+                .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+          </label>
+        )}
         <label title="Order of products within each group.">
           Sort:
           <select value={layout.sort} onChange={e => setLayout(l => ({ ...l, sort: e.target.value }))}

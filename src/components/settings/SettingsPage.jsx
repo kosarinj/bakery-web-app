@@ -126,6 +126,19 @@ export default function SettingsPage() {
           </div>
 
           <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Order of Groups</label>
+            <select className="form-control" value={settings.ticket_group_order || 'az'}
+              onChange={e => saveSetting('ticket_group_order', e.target.value)}>
+              {(ticketOpts?.group_orders || [{ value: 'az', label: 'A–Z' }])
+                .map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+            </select>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              Which group heading comes first on the ticket. Totals are per ticket.
+              {saved === 'ticket_group_order' && <span style={{ color: 'var(--primary)', fontWeight: 600 }}> ✓ Saved</span>}
+            </div>
+          </div>
+
+          <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Sort Within Each Group</label>
             <select className="form-control" value={settings.ticket_sort_within || 'name'}
               onChange={e => saveSetting('ticket_sort_within', e.target.value)}>

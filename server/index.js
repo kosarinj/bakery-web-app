@@ -1563,6 +1563,21 @@ const TICKET_SORTS = {
                 label: 'Largest dollar amount first' },
 }
 
+// The order of the group headings themselves. `field` is the grouping column
+// and `part` the window partition (the column, plus gluten free when GF prints
+// as its own block, so a type's GF lines are totalled apart from its regular
+// ones). Window sums may sit in ORDER BY; each ticket is queried on its own, so
+// the totals are per account. The column follows every total as a tie-break,
+// which also keeps two groups with the same total from interleaving.
+const TICKET_GROUP_ORDERS = {
+  az:         { sql: (field) => `${field} ASC NULLS LAST`, label: 'A–Z' },
+  za:         { sql: (field) => `${field} DESC NULLS LAST`, label: 'Z–A' },
+  units_desc: { sql: (field, part) => `SUM(${TICKET_NET_UNITS}) OVER (PARTITION BY ${part}) DESC, ${field} ASC NULLS LAST`,
+                label: 'Most units first' },
+  total_desc: { sql: (field, part) => `SUM(COALESCE(o.wprice,0) * ${TICKET_NET_UNITS}) OVER (PARTITION BY ${part}) DESC, ${field} ASC NULLS LAST`,
+                label: 'Largest dollar amount first' },
+}
+
 /**
  * How one ticket's lines are grouped and sorted.
  *
@@ -1576,6 +1591,7 @@ function ticketLineOrder(settings = {}, q = {}) {
 
   const groupBy = pick(TICKET_GROUPS, q.group, settings.ticket_group_by, 'prod_type')
   const sortBy  = pick(TICKET_SORTS,  q.sort,  settings.ticket_sort_within, 'name')
+  const groupOrder = pick(TICKET_GROUP_ORDERS, q.gorder, settings.ticket_group_order, 'az')
   // Separating gluten free is on unless explicitly turned off, in either place.
   const gfSeparate = q.gf != null ? q.gf !== '0' : settings.ticket_gf_separate !== 'false'
 
@@ -1584,14 +1600,17 @@ function ticketLineOrder(settings = {}, q = {}) {
   // Gluten free to the foot of the ticket, the way post_bake.frm kept it as a
   // separate list — so nobody packs a GF loaf into the regular order.
   if (gfSeparate) parts.push('COALESCE(p.gluten_free, false) ASC')
-  if (group.field) parts.push(`${group.field} ASC NULLS LAST`)
+  if (group.field) {
+    const part = gfSeparate ? `COALESCE(p.gluten_free, false), ${group.field}` : group.field
+    parts.push(TICKET_GROUP_ORDERS[groupOrder].sql(group.field, part))
+  }
   parts.push(TICKET_SORTS[sortBy].sql)
 
-  return { groupBy, sortBy, gfSeparate, groupKey: group.key, orderBy: parts.join(', ') }
+  return { groupBy, sortBy, groupOrder, gfSeparate, groupKey: group.key, orderBy: parts.join(', ') }
 }
 
 const TICKET_SETTING_KEYS = `'bakery_name','bakery_address','bakery_phone',`
-  + `'ticket_group_by','ticket_sort_within','ticket_gf_separate'`
+  + `'ticket_group_by','ticket_group_order','ticket_sort_within','ticket_gf_separate'`
 
 /**
  * GET /api/billing/ticket-options
@@ -1603,8 +1622,9 @@ app.get('/api/billing/ticket-options', requireAuth, (req, res) => {
   const list = (table) => Object.entries(table).map(([value, v]) => ({ value, label: v.label }))
   res.json({
     groups: list(TICKET_GROUPS),
+    group_orders: list(TICKET_GROUP_ORDERS),
     sorts: list(TICKET_SORTS),
-    defaults: { group_by: 'prod_type', sort_within: 'name', gf_separate: 'true' },
+    defaults: { group_by: 'prod_type', group_order: 'az', sort_within: 'name', gf_separate: 'true' },
   })
 })
 
@@ -1612,7 +1632,8 @@ app.get('/api/billing/ticket-options', requireAuth, (req, res) => {
 
 /**
  * GET /api/billing/print/tickets?del_date=YYYY-MM-DD&account=
- *   &group=prod_type|prod_group|none  &sort=name|units_desc|total_desc  &gf=0|1
+ *   &group=prod_type|prod_group|none  &gorder=az|za|units_desc|total_desc
+ *   &sort=name|units_desc|total_desc  &gf=0|1
  *
  * The same tickets as the Excel export, as a printable page — one account per
  * sheet of paper, opened in a tab and printed straight from the browser.
@@ -1724,6 +1745,9 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
     ${acctFilter ? `<input type="hidden" name="account" value="${esc(acctFilter)}">` : ''}
     <label>Group
       <select name="group" onchange="this.form.submit()">${sel(TICKET_GROUPS, ord.groupBy)}</select>
+    </label>
+    <label>Group order
+      <select name="gorder" onchange="this.form.submit()">${sel(TICKET_GROUP_ORDERS, ord.groupOrder)}</select>
     </label>
     <label>Sort
       <select name="sort" onchange="this.form.submit()">${sel(TICKET_SORTS, ord.sortBy)}</select>
