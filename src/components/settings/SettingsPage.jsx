@@ -113,6 +113,25 @@ export default function SettingsPage() {
           </div>
 
           <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Header</label>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {[['ticket_header_first_size', 'First word', '20'], ['ticket_header_size', 'Rest of name', '14']].map(([key, label, def]) => (
+                <label key={key} style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                  {label}
+                  <select className="form-control" style={{ width: 'auto' }} value={settings[key] || def}
+                    onChange={e => saveSetting(key, e.target.value)}>
+                    {[10, 12, 14, 16, 18, 20, 22, 24, 28, 32, 36].map(n => <option key={n} value={String(n)}>{n} pt</option>)}
+                  </select>
+                  {saved === key && <span style={{ color: 'var(--primary)', fontWeight: 600 }}>✓ Saved</span>}
+                </label>
+              ))}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              The Bakery Name across the top of each ticket — e.g. "{(settings.bakery_name || '').trim().split(/\s+/)[0] || 'Meredith’s'}" at the first size, the rest at the second.
+            </div>
+          </div>
+
+          <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Group By</label>
             <select className="form-control" value={settings.ticket_group_by || 'prod_type'}
               onChange={e => saveSetting('ticket_group_by', e.target.value)}>

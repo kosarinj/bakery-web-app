@@ -104,10 +104,27 @@ function flatten(groups) {
   return out
 }
 
+/**
+ * The bakery name heading, from settings: the first word ("Meredith's") at
+ * one size and the rest ("Bread") at another, so the name can read like the
+ * shop's sign. Sizes are points.
+ */
+export function ticketHeader(settings, name) {
+  const size = (v, d) => { const n = parseInt(v, 10); return n >= 6 && n <= 72 ? n : d }
+  const text = String(name || '').trim()
+  const cut = text.search(/\s/)
+  return {
+    first: cut < 0 ? text : text.slice(0, cut),
+    rest: cut < 0 ? '' : text.slice(cut),
+    firstSize: size(settings.ticket_header_first_size, 20),
+    restSize: size(settings.ticket_header_size, 14),
+  }
+}
+
 const HEADINGS = ['Units', 'Pack', 'Product', 'Cost', 'Retail', 'Total']
 
 /** One account's ticket onto an ExcelJS worksheet. */
-export function writeTicketSheet(ws, { bakery, account, del_date, layout }) {
+export function writeTicketSheet(ws, { header, account, del_date, layout }) {
   // A–F left column, G a gutter, H–M right column.
   ;[5, 5, 22, 7, 7, 8, 2, 5, 5, 22, 7, 7, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w })
   Object.assign(ws.pageSetup, {
@@ -120,12 +137,18 @@ export function writeTicketSheet(ws, { bakery, account, del_date, layout }) {
   const font = (size, bold = true) => ({ name: 'Arial', size, bold })
   const L = 1, R = 8   // first column of each half
 
-  if (bakery) {
-    ws.mergeCells('A1:M1')
-    ws.getCell('A1').value = bakery
-    ws.getCell('A1').font = font(14)
-    ws.getCell('A1').alignment = { horizontal: 'center' }
-    ws.getRow(1).height = 18
+  if (header?.first) {
+    // Rows 1–2 merged into one tall cell, so the large first word has room.
+    ws.mergeCells('A1:M2')
+    const c = ws.getCell('A1')
+    c.value = { richText: [
+      { text: header.first, font: font(header.firstSize) },
+      ...(header.rest ? [{ text: header.rest, font: font(header.restSize) }] : []),
+    ] }
+    c.alignment = { horizontal: 'center', vertical: 'middle' }
+    const h = Math.max(header.firstSize, header.restSize) * 1.3 / 2
+    ws.getRow(1).height = h
+    ws.getRow(2).height = h
   }
   ws.mergeCells('A3:F3')
   ws.getCell('A3').value = del_date
@@ -200,7 +223,7 @@ export function writeTicketSheet(ws, { bakery, account, del_date, layout }) {
 }
 
 /** One account's ticket as an HTML table, for the printable page. */
-export function ticketTableHtml({ bakery, account, del_date, layout, esc }) {
+export function ticketTableHtml({ header, account, del_date, layout, esc }) {
   const cells = (item) => {
     if (!item || item.kind === 'blank') return '<td colspan="6">&nbsp;</td>'
     if (item.kind === 'head') return `<td colspan="2"></td><td class="grp" colspan="4">${esc(item.label)}</td>`
@@ -222,7 +245,9 @@ export function ticketTableHtml({ bakery, account, del_date, layout, esc }) {
     <table class="grid">
       <colgroup>${col}<col style="width:2%">${col}</colgroup>
       <thead>
-        ${bakery ? `<tr><th colspan="13" class="bakery">${esc(bakery)}</th></tr>` : ''}
+        ${header?.first ? `<tr><th colspan="13" class="bakery">`
+          + `<span style="font-size:${header.firstSize}pt">${esc(header.first)}</span>`
+          + `<span style="font-size:${header.restSize}pt">${esc(header.rest)}</span></th></tr>` : ''}
         <tr><th colspan="13" class="date">${esc(del_date)}</th></tr>
         <tr><th colspan="13" class="acct">${esc(account)}</th></tr>
         <tr class="cols">${half}<th class="gap"></th>${half}</tr>
@@ -247,7 +272,7 @@ export const TICKET_GRID_CSS = `
   table.grid { width: 100%; border-collapse: collapse; table-layout: fixed; }
   .grid th, .grid td { font-size: 8pt; font-weight: 700; padding: 1px 3px; text-align: left;
                        overflow-wrap: anywhere; }
-  .grid .bakery { font-size: 14pt; text-align: center; }
+  .grid .bakery { text-align: center; white-space: pre; }
   .grid .date { font-size: 11pt; font-weight: 400; text-align: center; }
   .grid .acct { font-size: 14pt; text-align: center; padding-bottom: 4px; }
   .grid .cols th { border-top: 1px solid #000; border-bottom: 1px solid #000; text-align: center; }

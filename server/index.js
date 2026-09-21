@@ -8,7 +8,7 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pool, { query } from './db.js'
 import { openMDB, makeTableGetter, getTableInfo, IMPORTERS } from './mdb-import.js'
-import { ticketLayout, writeTicketSheet, ticketTableHtml, TICKET_GRID_CSS } from './ticketLayout.js'
+import { ticketLayout, ticketHeader, writeTicketSheet, ticketTableHtml, TICKET_GRID_CSS } from './ticketLayout.js'
 
 const PgStore = connectPgSimple(session)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1617,6 +1617,7 @@ const TICKET_EXTRAS_COND = `(NOT COALESCE(p.is_extra, false) OR EXISTS (
   SELECT 1 FROM accounts wa WHERE TRIM(wa.name) = TRIM(o.account) AND wa.category ILIKE '%wholesale%'))`
 
 const TICKET_SETTING_KEYS = `'bakery_name','bakery_address','bakery_phone',`
+  + `'ticket_header_first_size','ticket_header_size',`
   + `'ticket_group_by','ticket_group_order','ticket_sort_within','ticket_gf_separate'`
 
 /**
@@ -1711,7 +1712,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
         : ''
       sheets.push(`
         <section class="ticket">
-          ${ticketTableHtml({ bakery: bakeryName, account: acct.account, del_date, layout, esc })}
+          ${ticketTableHtml({ header: ticketHeader(settings, bakeryName), account: acct.account, del_date, layout, esc })}
           ${bal}
         </section>`)
     }
@@ -1848,7 +1849,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
 
       // The office's two-column paper ticket — see ticketLayout.js, which the
       // printable page renders from too.
-      writeTicketSheet(ws, { bakery: bakeryName, account: acct.account, del_date, layout: ticketLayout(lines, ord) })
+      writeTicketSheet(ws, { header: ticketHeader(settings, bakeryName), account: acct.account, del_date, layout: ticketLayout(lines, ord) })
     }
 
     const filename = `tickets_${del_date}${acctFilter ? '_' + acctFilter.replace(/\s+/g, '_') : ''}.xlsx`
