@@ -2300,12 +2300,18 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
 
     const batchGroups = Object.values(groupMap).map(g => {
       const batches = g.multiplier > 0 ? Math.ceil(g.total_equiv / g.multiplier) : 1
-      // Recipe for the group: try the group name, then ANY product in that group (ordered or not),
-      // then the ordered members.
+      // Recipe for the group: the group recipe, else a recipe belonging to one of
+      // the products actually ORDERED, else any other product in the group.
+      //
+      // Ordered before unordered, because the other way round printed a recipe for
+      // something nobody asked for: with no MUFFIN group recipe, a card for HEALTH
+      // MUFFIN and BRAN MUFFIN — which both have their own recipes — borrowed
+      // BLUEBERRY MUFFIN's, and the QUICHE card ignored the ordered SM-QUIC-HAM in
+      // favour of LG-QUIC-SPIN.
       const members = membersByGroup[(g.group || '').trim().toLowerCase()] || []
       const recipes = findRecipe(g.group)
-        || members.map(n => findRecipe(n)).find(Boolean)
         || g.products.map(p => findRecipe(p.prod_name)).find(Boolean)
+        || members.map(n => findRecipe(n)).find(Boolean)
         || []
       const out = { ...g, batches, recipe: recipes, ingredients: scaleIngredients(recipes, batches) }
       if (recipes.length === 0) out.recipeSearched = [g.group, ...members].filter(Boolean)
