@@ -59,6 +59,24 @@ export function rollUp(cups, tbsp, tsp) {
   return { cups: Math.round(outCups * 100) / 100, tbsp: outTbsp, tsp: outTsp }
 }
 
+/**
+ * Water also stated by weight, as the old sheet does: "26.25 cup(s) 2 tbsp OR 13
+ * lbs 4 oz". Water is weighed into the mixer, so the bakers read this line.
+ *
+ * A cup is 8 oz and a tablespoon counts as 1 oz. A tablespoon of water really
+ * weighs about half that, but print_bake.frm adds it as 1 and these sheets are
+ * checked against each other, so the arithmetic follows the old program.
+ */
+export function waterWeight(ingredient, v) {
+  if (!/^(warm\s+)?water$/i.test(String(ingredient || '').trim())) return null
+  const oz = num(v.cups) * 8 + num(v.tbsp)
+  if (oz <= 0) return null
+  if (oz < 16) return `OR ${trim(oz)} oz`
+  const lb = Math.floor(oz / 16)
+  const rest = Math.round((oz - lb * 16) * 100) / 100
+  return `OR ${lb} lb${lb === 1 ? '' : 's'}${rest ? ` ${trim(rest)} oz` : ''}`
+}
+
 function scaledParts(row, scale) {
   const parts = []
   const lbs = num(row.pounds) * scale, qty = num(row.qty) * scale
@@ -70,6 +88,9 @@ function scaledParts(row, scale) {
   if (lbs)    parts.push(`${trim(lbs)} lbs.`)
   if (v.cups) parts.push(`${trim(v.cups)} cup(s)`)
   if (v.tbsp) parts.push(`${trim(v.tbsp)} tbsp`)
+  // Between the tablespoons and the teaspoons, where the old sheet prints it.
+  const water = waterWeight(row.ingredient, v)
+  if (water)  parts.push(water)
   if (v.tsp)  parts.push(`${trim(v.tsp)} tsp`)
   if (qty)    parts.push(`${trim(qty)} ${row.ingr_unit || row.ingredient_unit || ''}`.trim())
   return parts

@@ -2191,6 +2191,10 @@ app.get('/api/billing/export/lead', requireAuth, async (req, res) => {
 
 // ─── Recipe Generator ──────────────────────────────────────────────────────
 
+// Batch counts are divisions, so they need a cap on the decimals: 41/5 is 8.2,
+// but a third of a batch would otherwise carry seventeen digits onto the sheet.
+const round3 = (n) => Math.round((Number(n) || 0) * 1000) / 1000
+
 function scaleIngredients(rows, factor) {
   return rows.map(r => ({
     ingredient: r.ingredient,
@@ -2287,7 +2291,11 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
         groupMap[o.prod_group].total_equiv += equiv
         groupMap[o.prod_group].products.push({ prod_name: o.prod_name, units, divisor, equiv })
       } else {
-        const batches = multiplier > 0 ? Math.ceil(units / multiplier) : units
+        // Not rounded up. 22 units of 12-GRAIN SOUR DO at 5 per batch is 4.4
+        // batches, and the old program scales the recipe by 4.4 — 26.4 cups of
+        // water, not the 30 a whole 5 batches would call for. Rounding up told the
+        // baker to mix more than the day needs.
+        const batches = multiplier > 0 ? round3(units / multiplier) : units
         const recipes = findRecipe(o.prod_name) || []
         multProducts.push({
           prod_name: o.prod_name, units, multiplier, batches,
@@ -2299,7 +2307,8 @@ app.get('/api/recipe-generator', requireAuth, async (req, res) => {
     })
 
     const batchGroups = Object.values(groupMap).map(g => {
-      const batches = g.multiplier > 0 ? Math.ceil(g.total_equiv / g.multiplier) : 1
+      // Exact, like the mult products above: the sheet states what the day needs.
+      const batches = g.multiplier > 0 ? round3(g.total_equiv / g.multiplier) : 1
       // Recipe for the group: the group recipe, else a recipe belonging to one of
       // the products actually ORDERED, else any other product in the group.
       //

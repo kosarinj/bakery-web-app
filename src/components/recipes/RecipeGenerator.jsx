@@ -1,5 +1,5 @@
 import { useState, useEffect } from 'react'
-import { rollUp } from './RecipeGrid'
+import { rollUp, waterWeight } from './RecipeGrid'
 import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
 function num(v) { const n = parseFloat(v); return isNaN(n) ? 0 : n }
@@ -19,6 +19,12 @@ function IngredientRow({ row, scale, editing, onSave }) {
   if (row.rectext && !row.ingredient) {
     return <tr><td colSpan={6} style={{ fontWeight: 600, fontStyle: 'italic', paddingTop: 8, paddingBottom: 4, color: 'var(--primary)' }}>{row.rectext}</td></tr>
   }
+  // Volumes re-expressed once for the row, the same way the printed sheet does it,
+  // so the screen and the paper can't disagree about the same recipe. Scaling each
+  // column on its own put "8 tbsp" in one place and "0.5 cup" in the other.
+  const rolled = rollUp(num(row.cups) * scale, num(row.tablespoons) * scale, num(row.teaspoons) * scale)
+  const ROLLED_FIELD = { cups: 'cups', tablespoons: 'tbsp', teaspoons: 'tsp' }
+
   const cell = (field, unit) => {
     const base = num(row[field])
     if (editing) {
@@ -31,7 +37,10 @@ function IngredientRow({ row, scale, editing, onSave }) {
           title={`Base per-batch ${unit}`} />
       )
     }
-    return fmt(base * scale, unit)
+    // Editing shows the stored per-batch number; viewing shows the scaled,
+    // rolled-up one. Pounds and qty are not volumes, so they just scale.
+    const key = ROLLED_FIELD[field]
+    return key ? fmt(rolled[key], unit) : fmt(base * scale, unit)
   }
   return (
     <tr>
@@ -222,6 +231,9 @@ export default function RecipeGenerator() {
       if (lbs)    parts.push(`${trim(lbs)} lbs.`)
       if (v.cups) parts.push(`${trim(v.cups)} cup(s)`)
       if (v.tbsp) parts.push(`${trim(v.tbsp)} tbsp`)
+      // Between the tablespoons and the teaspoons, where the old sheet prints it.
+      const water = waterWeight(row.ingredient, v)
+      if (water)  parts.push(water)
       if (v.tsp)  parts.push(`${trim(v.tsp)} tsp`)
       if (qty)    parts.push(`${trim(qty)} ${esc(row.ingr_unit || '')}`.trim())
       return `<div class="ing"><span class="nm">${esc(row.ingredient)}:</span> ${parts.join('  ')}</div>`
