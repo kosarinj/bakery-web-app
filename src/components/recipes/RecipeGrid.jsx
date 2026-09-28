@@ -8,27 +8,55 @@ function trim(n) { const v = parseFloat(n); return v % 1 === 0 ? String(v) : v.t
 
 // Scale one recipe row by `scale` and return its printable ingredient parts (matches RecipeGenerator).
 /**
- * Volume re-expressed in the largest sensible measure.
+ * Volume re-expressed the way the old VB6 program printed it.
  *
- * Scaling multiplies each column on its own, so a recipe calling for 2 tbsp and
- * 1 tsp at x4 reads "8 tbsp 4 tsp" — correct, and nobody measures that way. The
- * old program showed the same amount as "0.5 cup(s) 1 tbsp 1 tsp", which is what
- * you actually reach for.
+ * Scaling multiplies each column on its own, so 2 tbsp + 1 tsp at x4 reads
+ * "8 tbsp 4 tsp" — correct, and nobody measures that way.
  *
- * Cups go in half-cup steps (8 tbsp = half a cup) because that is the measure
- * that exists in a kitchen; the remainder falls to tablespoons then teaspoons.
- * 1 cup = 16 tbsp = 48 tsp.
+ * This is a port of post_bake/print_bake.frm (the `totcup` block), not a fresh
+ * idea, because the bakers compare these sheets against the old ones and a
+ * different-but-equivalent breakdown reads as a changed recipe:
+ *
+ *   1. add everything up in cups (1 cup = 16 tbsp = 48 tsp)
+ *   2. snap the fraction DOWN to a quarter, third, half, two thirds or three
+ *      quarters of a cup — the marks on a measuring cup
+ *   3. whatever is left becomes whole tablespoons, then teaspoons
+ *
+ * Two quirks are deliberate, because the old program has them and matching it is
+ * the point: a third and two thirds absorb the remainder (nothing follows them),
+ * and a fraction under a quarter cup stays entirely in tbsp/tsp.
+ *
+ * An earlier version of this rounded to half cups only, which is why "0.25 cup 2
+ * tbsp" came out as "6 tbsp".
  */
 export function rollUp(cups, tbsp, tsp) {
-  const totalTsp = cups * 48 + tbsp * 3 + tsp
-  if (totalTsp <= 0) return { cups: 0, tbsp: 0, tsp: 0 }
-  const halfCups = Math.floor(totalTsp / 24)
-  let rest = totalTsp - halfCups * 24
-  const outTbsp = Math.floor(rest / 3)
-  rest -= outTbsp * 3
+  const totalCups = num(cups) + num(tbsp) / 16 + num(tsp) / 48
+  if (totalCups <= 0) return { cups: 0, tbsp: 0, tsp: 0 }
+
+  let outCups = Math.floor(totalCups)
+  let rem = totalCups - outCups
+  // Rounded to 2dp for the comparisons, as the old program does, so 0.3333 is
+  // recognised as a third.
+  const r = Math.round(rem * 100) / 100
+  const isThird = r === 0.32 || r === 0.33 || r === 0.34
+  const isTwoThirds = r === 0.66 || r === 0.67 || r === 0.68
+
+  // The ranges are the old program's, upper bounds included: a remainder above
+  // 0.99 matches no branch there and keeps its whole fraction, so it must not be
+  // snapped down to a half here either.
+  if (isThird) { outCups += 0.33; rem = 0 }
+  else if (isTwoThirds) { outCups += 0.67; rem = 0 }
+  else if (rem >= 0.75 && rem <= 0.99) { outCups += 0.75; rem -= 0.75 }
+  else if (rem >= 0.5 && rem < 0.75) { outCups += 0.5; rem -= 0.5 }
+  else if (rem >= 0.25 && rem < 0.5) { outCups += 0.25; rem -= 0.25 }
+  // else: under a quarter cup, so it all falls through to tbsp/tsp below.
+
+  const tbspFloat = rem * 16
+  const outTbsp = Math.floor(tbspFloat)
   // Two decimals: a scale factor can leave a third of a teaspoon, and rounding
   // it away silently loses the ingredient.
-  return { cups: halfCups * 0.5, tbsp: outTbsp, tsp: Math.round(rest * 100) / 100 }
+  const outTsp = Math.round((tbspFloat - outTbsp) * 3 * 100) / 100
+  return { cups: Math.round(outCups * 100) / 100, tbsp: outTbsp, tsp: outTsp }
 }
 
 function scaledParts(row, scale) {

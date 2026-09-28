@@ -214,11 +214,11 @@ export default function RecipeGenerator() {
       if (row.rectext && !row.ingredient) return `<div class="sec">${esc(row.rectext)}</div>`
       const parts = []
       const lbs = num(row.pounds) * scale, qty = num(row.qty) * scale
-      // Rolled up when scaled, as the printed recipe is what someone measures
-      // from — "8 tbsp 4 tsp" is right and unusable.
-      const v = scale === 1
-        ? { cups: num(row.cups), tbsp: num(row.tablespoons), tsp: num(row.teaspoons) }
-        : rollUp(num(row.cups) * scale, num(row.tablespoons) * scale, num(row.teaspoons) * scale)
+      // Always rolled up, at one batch too, because the old program's bake sheet
+      // converts whatever the amount is: 3 tsp printed there as "1 tbsp". Showing
+      // the stored breakdown at 1x instead made a single batch disagree with the
+      // sheet the bakers already know.
+      const v = rollUp(num(row.cups) * scale, num(row.tablespoons) * scale, num(row.teaspoons) * scale)
       if (lbs)    parts.push(`${trim(lbs)} lbs.`)
       if (v.cups) parts.push(`${trim(v.cups)} cup(s)`)
       if (v.tbsp) parts.push(`${trim(v.tbsp)} tbsp`)
