@@ -719,12 +719,16 @@ app.get('/api/orders', requireAuth, async (req, res) => {
 })
 
 app.post('/api/orders', requireAuth, async (req, res) => {
-  const { prod_name, account, units, wprice, rprice, ordr_dt, del_date, special_ords, notes } = req.body
+  const { prod_name, account, units, wprice, rprice, ordr_dt, del_date, special_ords, notes, postbake } = req.body
   try {
+    // Post Bake mode (post_bake.frm): an order added after the bake is all
+    // post-bake, so the whole quantity goes in postbake_adj and Repeat Orders
+    // leaves it out of next week.
     const { rows } = await query(
-      `INSERT INTO daily_orders(prod_name,account,units,wprice,rprice,ordr_dt,del_date,special_ords,notes,last_update)
-       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,NOW()) RETURNING *`,
-      [prod_name, account, units||0, wprice||0, rprice||0, ordr_dt||new Date().toISOString().slice(0,10), del_date||null, special_ords||0, notes]
+      `INSERT INTO daily_orders(prod_name,account,units,wprice,rprice,ordr_dt,del_date,special_ords,notes,postbake_adj,last_update)
+       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW()) RETURNING *`,
+      [prod_name, account, units||0, wprice||0, rprice||0, ordr_dt||new Date().toISOString().slice(0,10), del_date||null, special_ords||0, notes,
+       postbake ? (units||0) : 0]
     )
     res.json(rows[0])
   } catch (e) {
@@ -736,10 +740,18 @@ app.patch('/api/orders/:id', requireAuth, async (req, res) => {
   const fields = ['units','wprice','rprice','ordr_dt','del_date','special_ords','postbake_adj','notes']
   const updates = ['last_update=NOW()']
   const vals = []
+  // Post Bake mode (post_bake.frm): the change in units also accumulates in
+  // postbake_adj, so Repeat Orders (units - special_ords - postbake_adj) does
+  // not carry it into next week. Done in SQL so it's the stored units it
+  // compares against; SET reads the row's old values.
+  if (req.body.postbake && req.body.units !== undefined && req.body.postbake_adj === undefined) {
+    vals.push(req.body.units)
+    updates.push(`postbake_adj=COALESCE(postbake_adj,0) + ($${vals.length}::numeric - COALESCE(units,0))`)
+  }
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   vals.push(req.params.id)
-  await query(`UPDATE daily_orders SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)
-  res.json({ success: true })
+  const { rows } = await query(`UPDATE daily_orders SET ${updates.join(',')} WHERE id=$${vals.length} RETURNING postbake_adj`, vals)
+  res.json({ success: true, postbake_adj: rows[0] ? parseFloat(rows[0].postbake_adj) || 0 : 0 })
 })
 
 app.delete('/api/orders/:id', requireAuth, async (req, res) => {
@@ -1064,6 +1076,14 @@ app.patch('/api/recipes/:id', requireAuth, async (req, res) => {
   const fields = ['sequence','teaspoons','tablespoons','cups','pounds','rec_group','qty','rectext']
   const updates = ['last_update=NOW()']
   const vals = []
+  // Post Bake mode (post_bake.frm): the change in units also accumulates in
+  // postbake_adj, so Repeat Orders (units - special_ords - postbake_adj) does
+  // not carry it into next week. Done in SQL so it's the stored units it
+  // compares against; SET reads the row's old values.
+  if (req.body.postbake && req.body.units !== undefined && req.body.postbake_adj === undefined) {
+    vals.push(req.body.units)
+    updates.push(`postbake_adj=COALESCE(postbake_adj,0) + ($${vals.length}::numeric - COALESCE(units,0))`)
+  }
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   vals.push(req.params.id)
   await query(`UPDATE recipes SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)

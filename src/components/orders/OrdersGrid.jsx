@@ -117,6 +117,18 @@ export default function OrdersGrid() {
   const [clearAccount, setClearAccount] = useState('')
   const [acctBoxSearch, setAcctBoxSearch] = useState('') // search within the Filter Accounts box
 
+  // Mode, as the old program's two screens: "adjust" (Adjust Orders) changes
+  // units only; "postbake" (Post Bake Adjustments) also records each change in
+  // postbake_adj, so Repeat Orders leaves it out of next week.
+  const [mode, setMode] = useState(() => {
+    try { return localStorage.getItem('orders_mode') === 'postbake' ? 'postbake' : 'adjust' } catch { return 'adjust' }
+  })
+  const modeRef = useRef(mode)
+  const changeMode = m => {
+    setMode(m); modeRef.current = m
+    try { localStorage.setItem('orders_mode', m) } catch {}
+  }
+
   const orderMapRef = useRef({})
 
   // Load settings
@@ -167,7 +179,7 @@ export default function OrdersGrid() {
         const map = {}
         const ddMap = {}
         ;(Array.isArray(orders) ? orders : []).forEach(o => {
-          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0, wprice: parseFloat(o.wprice) || 0 }
+          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0, wprice: parseFloat(o.wprice) || 0, postbake_adj: parseFloat(o.postbake_adj) || 0 }
           if (o.del_date && !ddMap[o.account]) ddMap[o.account] = String(o.del_date).slice(0, 10)
         })
         // Seed missing accounts from account.next_del
@@ -187,7 +199,7 @@ export default function OrdersGrid() {
         if (!Array.isArray(orders)) return
         const map = {}
         orders.forEach(o => {
-          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0, wprice: parseFloat(o.wprice) || 0 }
+          map[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0, wprice: parseFloat(o.wprice) || 0, postbake_adj: parseFloat(o.postbake_adj) || 0 }
         })
         setOrderMap(map); orderMapRef.current = map
       })
@@ -199,20 +211,23 @@ export default function OrdersGrid() {
     const key = `${account}|${prod_name}`
     const existing = orderMapRef.current[key]
     try {
+      const postbake = modeRef.current === 'postbake'
       if (existing) {
-        await fetch(`/api/orders/${existing.id}`, {
+        const r = await fetch(`/api/orders/${existing.id}`, {
           method: 'PATCH', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-          body: JSON.stringify({ units })
+          body: JSON.stringify({ units, postbake })
         })
-        const updated = { ...orderMapRef.current, [key]: { ...existing, units, wprice: existing.wprice || 0 } }
+        const res = await r.json().catch(() => ({}))
+        const postbake_adj = res.postbake_adj !== undefined ? res.postbake_adj : existing.postbake_adj
+        const updated = { ...orderMapRef.current, [key]: { ...existing, units, wprice: existing.wprice || 0, postbake_adj } }
         orderMapRef.current = updated; setOrderMap(updated)
       } else {
         const r = await fetch('/api/orders', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-          body: JSON.stringify({ prod_name, account, units, ordr_dt: curDate })
+          body: JSON.stringify({ prod_name, account, units, ordr_dt: curDate, postbake })
         })
         const row = await r.json()
-        const updated = { ...orderMapRef.current, [key]: { id: row.id, units: parseFloat(row.units) || 0 } }
+        const updated = { ...orderMapRef.current, [key]: { id: row.id, units: parseFloat(row.units) || 0, postbake_adj: parseFloat(row.postbake_adj) || 0 } }
         orderMapRef.current = updated; setOrderMap(updated)
       }
     } catch (e) { setError(`Save failed: ${e.message}`) }
@@ -409,6 +424,11 @@ export default function OrdersGrid() {
     const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
     return entryAt(acct, prod)?.units ?? 0
   }
+  // Post-bake adjustment on a real (ungrouped) cell, for the marker.
+  const cellPostbake = (r, c) => {
+    const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
+    return orderMap[`${acct}|${prod}`]?.postbake_adj || 0
+  }
   const onSave = (r, c) => v => {
     const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
     saveCell(acct, prod, v, date)
@@ -505,6 +525,16 @@ export default function OrdersGrid() {
           )}
         </div>
 
+        <label style={{ gap: 6 }}
+          title="Adjust Orders changes the order only. Post Bake also records the change as a post-bake adjustment, which Repeat Orders leaves out of next week.">
+          Mode:
+          <select value={mode} onChange={e => changeMode(e.target.value)}
+            style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, fontWeight: mode === 'postbake' ? 700 : 400,
+              background: mode === 'postbake' ? '#fef3c7' : 'var(--surface)', color: mode === 'postbake' ? '#92400e' : 'inherit' }}>
+            <option value="adjust">Adjust Orders</option>
+            <option value="postbake">Post Bake</option>
+          </select>
+        </label>
         <button className={`btn btn-sm ${hideEmptyRows ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => setHideEmptyRows(v => !v)} title="Hide rows with no orders">
           {hideEmptyRows ? '▣' : '▢'} Rows
@@ -797,8 +827,11 @@ export default function OrdersGrid() {
                     {cols.map(c => {
                       const val = cellVal(r, c)
                       const cellIsGroup = flipped ? c.isGroup : r.isGroup
+                      const pb = cellIsGroup ? 0 : cellPostbake(r, c)
                       return (
-                        <td key={colKey(c)} className={`order-cell${val > 0 ? ' order-cell-filled' : ''}`}>
+                        <td key={colKey(c)} className={`order-cell${val > 0 ? ' order-cell-filled' : ''}`}
+                          style={pb ? { position: 'relative', boxShadow: 'inset 0 0 0 2px #f59e0b' } : undefined}
+                          title={pb ? `Post bake ${pb > 0 ? '+' : ''}${pb} — Repeat Orders repeats ${Math.max(0, val - pb)}` : undefined}>
                           {cellIsGroup
                             ? <span style={{ display: 'block', textAlign: 'right', padding: '0 4px', fontWeight: 600, color: val > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{val || ''}</span>
                             : <EditableCell value={val} onSave={onSave(r, c)} type="number" align="right" />}
