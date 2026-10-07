@@ -268,3 +268,13 @@ ALTER TABLE accounts ADD COLUMN IF NOT EXISTS sendweb       BOOLEAN DEFAULT FALS
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS webstart      DATE;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS webend        DATE;
 ALTER TABLE accounts ADD COLUMN IF NOT EXISTS adj_level     INTEGER DEFAULT 0;
+
+-- Post Bake final counts (post_bake.frm's Final_count table): what was counted
+-- on the racks after the bake, per product per baking date. Have = inventory + final.
+CREATE TABLE IF NOT EXISTS final_counts (
+  final_date  DATE NOT NULL,
+  prod_name   TEXT NOT NULL,
+  final       NUMERIC(10,2) DEFAULT 0,
+  last_update TIMESTAMPTZ DEFAULT NOW(),
+  PRIMARY KEY (final_date, prod_name)
+);

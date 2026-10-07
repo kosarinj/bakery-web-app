@@ -221,6 +221,17 @@ async function initDB() {
     console.log('Applied: activity_log table')
   }
 
+  // Post Bake final counts (post_bake.frm's Final_count table)
+  await pool.query(`
+    CREATE TABLE IF NOT EXISTS final_counts (
+      final_date  DATE NOT NULL,
+      prod_name   TEXT NOT NULL,
+      final       NUMERIC(10,2) DEFAULT 0,
+      last_update TIMESTAMPTZ DEFAULT NOW(),
+      PRIMARY KEY (final_date, prod_name)
+    )
+  `)
+
   // Mark stub accounts inactive: those created by historical imports with no route/acctgrp/balance data
   // Uses ON CONFLICT DO NOTHING trick — just sets active=false for bare stubs
   const { rowCount } = await pool.query(`

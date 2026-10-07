@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import EditableCell from '../shared/EditableCell'
+import { printReport, groupBy } from './postbakeReports'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
 import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
@@ -124,8 +125,14 @@ export default function OrdersGrid() {
     try { return localStorage.getItem('orders_mode') === 'postbake' ? 'postbake' : 'adjust' } catch { return 'adjust' }
   })
   const modeRef = useRef(mode)
+  // Post Bake columns (post_bake.frm): prod_name → { need, inventory, final }
+  const [pbData, setPbData] = useState({})
+  const [pbGF, setPbGF] = useState(false)          // GF versions of the Final Count sheet and Pie List
+  const [pbDeduct, setPbDeduct] = useState(false)  // Freezer List also deducts from inventory
+  const [pbBusy, setPbBusy] = useState('')
   const changeMode = m => {
     setMode(m); modeRef.current = m
+    if (m === 'postbake') setFlipped(true)
     try { localStorage.setItem('orders_mode', m) } catch {}
   }
 
@@ -207,6 +214,33 @@ export default function OrdersGrid() {
   }, [date])
   useLiveRefresh('orders', reloadOrders)
 
+  const loadPostbake = useCallback(() => {
+    if (!date || modeRef.current !== 'postbake') return
+    fetch(`/api/postbake?date=${date}`, { credentials: 'include' })
+      .then(r => r.json())
+      .then(list => {
+        if (!Array.isArray(list)) return
+        const m = {}
+        list.forEach(x => { m[x.prod_name] = x })
+        setPbData(m)
+      })
+      .catch(() => {})
+  }, [date])
+  useEffect(() => { if (mode === 'postbake') loadPostbake() }, [mode, loadPostbake])
+  useLiveRefresh('orders', loadPostbake)
+  useLiveRefresh('postbake', loadPostbake)
+
+  const saveFinal = useCallback(async (prod_name, final) => {
+    setPbData(d => ({ ...d, [prod_name]: { need: 0, inventory: 0, ...d[prod_name], final } }))
+    try {
+      const r = await fetch('/api/postbake/final', {
+        method: 'PUT', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ date, prod_name, final })
+      })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText)
+    } catch (e) { setError(`Final count save failed: ${e.message}`) }
+  }, [date])
+
   const saveCell = useCallback(async (account, prod_name, units, curDate) => {
     const key = `${account}|${prod_name}`
     const existing = orderMapRef.current[key]
@@ -218,6 +252,7 @@ export default function OrdersGrid() {
           body: JSON.stringify({ units, postbake })
         })
         const res = await r.json().catch(() => ({}))
+        if (!r.ok) throw new Error(res.error || r.statusText)
         const postbake_adj = res.postbake_adj !== undefined ? res.postbake_adj : existing.postbake_adj
         const updated = { ...orderMapRef.current, [key]: { ...existing, units, wprice: existing.wprice || 0, postbake_adj } }
         orderMapRef.current = updated; setOrderMap(updated)
@@ -227,11 +262,13 @@ export default function OrdersGrid() {
           body: JSON.stringify({ prod_name, account, units, ordr_dt: curDate, postbake })
         })
         const row = await r.json()
+        if (!r.ok) throw new Error(row.error || r.statusText)
         const updated = { ...orderMapRef.current, [key]: { id: row.id, units: parseFloat(row.units) || 0, postbake_adj: parseFloat(row.postbake_adj) || 0 } }
         orderMapRef.current = updated; setOrderMap(updated)
       }
+      if (modeRef.current === 'postbake') loadPostbake()
     } catch (e) { setError(`Save failed: ${e.message}`) }
-  }, [])
+  }, [loadPostbake])
 
   async function clearAccountOrders() {
     if (!clearAccount || !date) return
@@ -314,7 +351,7 @@ export default function OrdersGrid() {
     if (extrasOnly) p = p.filter(x => x.is_extra)
     if (filterProductType) p = p.filter(x => x.prod_type === filterProductType)
     if (filterProduct) p = p.filter(x => (x.prod_name||'').toLowerCase().includes(filterProduct.toLowerCase()))
-    if (hideEmptyCols && !accountFocused) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
+    if (hideEmptyCols && !accountFocused && !extrasOnly) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
     return p
   }, [products, extrasOnly, filterProductType, filterProduct, hideEmptyCols, accountFocused, accounts, orderMap])
 
@@ -323,10 +360,10 @@ export default function OrdersGrid() {
     if (marketsOnly) a = a.filter(x => x.category === 'farmers_market')
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
     if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
-    if (hideEmptyRows && !accountFocused) a = a.filter(x => visibleProducts.some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
+    if (hideEmptyRows && !accountFocused) a = a.filter(x => (extrasOnly ? products : visibleProducts).some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
     // Sort markets alphabetically by name (copy so we never mutate the accounts state)
     return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
-  }, [accounts, marketsOnly, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, visibleProducts, orderMap])
+  }, [accounts, marketsOnly, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, visibleProducts, orderMap, extrasOnly, products])
 
   // ── Market grouping: aggregate several stores (e.g. "Adams") into one order ──
   const [groupMarkets, setGroupMarkets] = useState(() => localStorage.getItem('orders_groupMarkets') === '1')
@@ -413,6 +450,82 @@ export default function OrdersGrid() {
   , [displayAccounts, visibleProducts, entryAt])
 
   if (loading) return <div className="loading">Loading orders...</div>
+
+  // ── Post Bake: grid columns and post_bake.frm's reports ──
+  const pb = mode === 'postbake' && flipped
+  const pbRow = prod => {
+    const d = pbData[prod] || { need: 0, inventory: 0, final: 0 }
+    const have = d.inventory + d.final
+    return { ...d, have, net: have - d.need }
+  }
+  const pbGet = async url => {
+    const r = await fetch(url, { credentials: 'include' })
+    const j = await r.json()
+    if (!r.ok) throw new Error(j.error || r.statusText)
+    return j
+  }
+  const runPb = async (kind) => {
+    setError('')
+    const dateLbl = `Baking date ${date}`
+    try {
+      setPbBusy(kind)
+      if (kind === 'postbake') {
+        const list = await pbGet(`/api/postbake/report?date=${date}`)
+        printReport({ title: 'Postbake Report', subtitle: dateLbl, columns: ['Account', 'Product', 'Postbake', 'Special Orders'],
+          groups: [{ rows: list.map(r => [r.account, r.prod_name, r.postbake_adj, r.special_ords || '']) }],
+          empty: 'No post-bake additions for this date.' })
+      } else if (kind === 'havneed') {
+        const list = visibleProducts.map(x => ({ prod: x.prod_name, ...pbRow(x.prod_name) })).filter(x => x.need > 0)
+        printReport({ title: 'Have / Need', subtitle: dateLbl, columns: ['Product', 'Have', 'Need'],
+          groups: [{ rows: list.map(x => [x.prod, x.have, x.need]) }] })
+      } else if (kind === 'final') {
+        const list = await pbGet(`/api/postbake/final-sheet?date=${date}&gf=${pbGF ? 1 : 0}`)
+        printReport({ title: `Final Count${pbGF ? ' — GF' : ''}`, subtitle: dateLbl, columns: ['Product', 'Count'],
+          groups: groupBy(list, r => r.prod_type).map(g => ({ heading: g.heading, rows: g.items.map(r => [r.prod_name, pbData[r.prod_name]?.final || '']) })) })
+      } else if (kind === 'freezer') {
+        if (pbDeduct && !window.confirm('Are you sure you want to deduct the freezer list from inventory?')) return
+        const r = await fetch('/api/postbake/freezer', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+          body: JSON.stringify({ date, deduct: pbDeduct })
+        })
+        const list = await r.json()
+        if (!r.ok) throw new Error(list.error || r.statusText)
+        if (pbDeduct) loadPostbake()
+        printReport({ title: 'Freezer List', subtitle: dateLbl + (pbDeduct ? ' — deducted from inventory' : ''), columns: ['Product', 'Need'],
+          groups: groupBy(list, r => r.prod_type).map(g => ({ heading: g.heading, rows: g.items.map(r => [r.product, r.need]) })) })
+      } else if (kind === 'pie') {
+        const list = await pbGet(`/api/postbake/pielist?date=${date}&gf=${pbGF ? 1 : 0}`)
+        printReport({ title: `Pie List${pbGF ? ' — GF' : ''}`, subtitle: dateLbl, columns: ['Product', 'Count'],
+          groups: groupBy(list, r => r.prod_type).map(g => ({ heading: g.heading, rows: g.items.map(r => [r.prod_name, r.count_num ?? '']) })) })
+      } else if (kind === 'wrap') {
+        const w = await pbGet(`/api/postbake/wrap?date=${date}`)
+        printReport({ title: 'Wrap Muffins', subtitle: `${dateLbl} — wrap accounts: ${w.accounts.join(', ') || 'none marked'}`,
+          columns: ['Muffin', 'Units'], groups: [{ rows: w.rows.map(r => [r.prod_name, r.units]) }],
+          empty: 'No muffins for wrap accounts on this date.' })
+      } else if (kind === 'usthem') {
+        // Have, Need, each account on screen, and US = Need less those accounts.
+        const accts = displayAccounts
+        const out = []
+        visibleProducts.forEach(x => {
+          const units = accts.map(a => entryAt(a.name, x.prod_name)?.units || 0)
+          const them = units.reduce((a, b) => a + b, 0)
+          if (them <= 0) return
+          const d = pbRow(x.prod_name)
+          out.push([x.prod_name, d.have, d.need, ...units.map(u => u || ''), d.need - them])
+        })
+        printReport({ title: 'Us / Them', subtitle: dateLbl, columns: ['Product', 'Have', 'Need', ...accts.map(a => a.name), 'US'],
+          groups: [{ rows: out }] })
+      } else if (kind === 'reset') {
+        if (!window.confirm('Are you sure you want to reset inventory? Every product goes back to its start-of-day inventory.')) return
+        const r = await fetch('/api/postbake/reset-inventory', { method: 'POST', credentials: 'include' })
+        const j = await r.json()
+        if (!r.ok) throw new Error(j.error || r.statusText)
+        loadPostbake()
+        setCopyMsg(`Inventory reset for ${j.count} products`)
+      }
+    } catch (e) { setError(`${kind}: ${e.message}`) }
+    finally { setPbBusy('') }
+  }
 
   const rows    = flipped ? visibleProducts : displayAccounts
   const cols    = flipped ? displayAccounts : visibleProducts
@@ -544,7 +657,8 @@ export default function OrdersGrid() {
           {hideEmptyCols ? '▣' : '▢'} Cols
         </button>
         <button className={`btn btn-sm ${flipped ? 'btn-primary' : 'btn-secondary'}`}
-          onClick={() => setFlipped(v => !v)} title="Swap rows and columns">
+          onClick={() => setFlipped(v => !v)} disabled={mode === 'postbake'}
+          title={mode === 'postbake' ? 'Post Bake lists products down the side' : 'Swap rows and columns'}>
           ⇄ Flip
         </button>
         {hasGroups && (
@@ -668,6 +782,36 @@ export default function OrdersGrid() {
         {copyMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>}
       </div>
 
+      {mode === 'postbake' && (
+        <div className="page-toolbar" style={{ marginBottom: 12, background: '#fef3c7', padding: '8px 10px', borderRadius: 'var(--radius-sm)', flexWrap: 'wrap' }}>
+          <strong style={{ fontSize: 13, color: '#92400e' }}>Post Bake</strong>
+          <label style={{ gap: 6 }} title="Final Count sheet and Pie List for the gluten-free products">
+            <input type="checkbox" checked={pbGF} onChange={e => setPbGF(e.target.checked)} /> GF
+          </label>
+          <label style={{ gap: 6 }} title="When generating the Freezer List, also take those quantities off inventory">
+            <input type="checkbox" checked={pbDeduct} onChange={e => setPbDeduct(e.target.checked)} /> Deduct from inventory
+          </label>
+          <span style={{ width: 1, alignSelf: 'stretch', background: '#f59e0b', margin: '0 4px' }} />
+          {[
+            ['postbake', 'Postbake Report'],
+            ['havneed', 'Have/Need Report'],
+            ['final', 'Final Count Reports'],
+            ['freezer', 'Generate Freezer List'],
+            ['pie', 'Pie List'],
+            ['wrap', 'Wrap Report'],
+            ['usthem', 'Us/Them Report'],
+          ].map(([k, label]) => (
+            <button key={k} className="btn btn-secondary btn-sm" disabled={!!pbBusy} onClick={() => runPb(k)}>
+              {pbBusy === k ? '…' : label}
+            </button>
+          ))}
+          <button className="btn btn-danger btn-sm" disabled={!!pbBusy} onClick={() => runPb('reset')}
+            title="Set every product's inventory back to its start-of-day inventory">
+            Reset Inventory
+          </button>
+        </div>
+      )}
+
       {/* ── Account selector for repeat ── */}
       {showRepeatAccounts && repeatAccounts && (
         <div style={{
@@ -740,6 +884,13 @@ export default function OrdersGrid() {
                 <th className="sticky-col" style={{ minWidth: 130 }}>
                   {flipped ? 'Product' : 'Account'}
                 </th>
+                {pb && <>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Have − Need">Net</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Inventory + Final Count">Have</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Ordered for this baking date, all accounts">Need</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }}>Inventory</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Counted after the bake — type it in">Final Count</th>
+                </>}
                 {cols.map(c => {
                   const isAcct = flipped  // in flipped mode cols are accounts
                   const dd = isAcct ? delDateMap[c.name] : null
@@ -775,6 +926,7 @@ export default function OrdersGrid() {
                   <td className="sticky-col" style={{ fontSize: 11, color: 'var(--primary)', fontWeight: 700, whiteSpace: 'nowrap' }}>
                     # Items
                   </td>
+                  {pb && <td colSpan={5} />}
                   {cols.map(c => {
                     const t = colTotal(c)
                     return <td key={colKey(c)} className="total-cell" style={{ fontSize: 12, color: t > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{t || ''}</td>
@@ -785,6 +937,7 @@ export default function OrdersGrid() {
                   <td className="sticky-col" style={{ fontSize: 11, color: '#16a34a', fontWeight: 700, whiteSpace: 'nowrap' }}>
                     $ Total
                   </td>
+                  {pb && <td colSpan={5} />}
                   {cols.map(c => {
                     const t = colDollarTotal(c)
                     return (
@@ -824,6 +977,21 @@ export default function OrdersGrid() {
                           style={{ fontSize: 10, color: 'var(--text-muted)', border: 'none', background: 'transparent', cursor: 'pointer', width: '100%', marginTop: 1 }} />
                       )}
                     </td>
+                    {pb && (() => {
+                      const d = pbRow(r.prod_name)
+                      const short = d.need > d.have
+                      const num = { textAlign: 'right', padding: '0 6px', fontSize: 12, whiteSpace: 'nowrap' }
+                      return <>
+                        <td style={{ ...num, fontWeight: 700, color: d.net < 0 ? '#dc2626' : d.net > 0 ? '#16a34a' : 'var(--text-muted)' }}>{d.net || ''}</td>
+                        <td style={{ ...num, fontWeight: d.inventory > 0 && d.final > 0 ? 700 : 400 }}>{d.have || ''}</td>
+                        <td style={{ ...num, fontWeight: 700, background: short ? '#fef08a' : undefined, color: short ? '#dc2626' : undefined }}
+                          title={short ? `Short ${d.need - d.have}` : undefined}>{d.need || ''}</td>
+                        <td style={num}>{d.inventory || ''}</td>
+                        <td className="order-cell" style={{ background: '#fffbeb' }}>
+                          <EditableCell value={d.final} onSave={v => saveFinal(r.prod_name, v)} type="number" align="right" />
+                        </td>
+                      </>
+                    })()}
                     {cols.map(c => {
                       const val = cellVal(r, c)
                       const cellIsGroup = flipped ? c.isGroup : r.isGroup

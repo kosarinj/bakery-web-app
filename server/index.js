@@ -1185,6 +1185,165 @@ app.get('/api/have-need', requireAuth, async (req, res) => {
   res.json(rows)
 })
 
+// ─── Post Bake (post_bake.frm) ─────────────────────────────────────────────
+// The old Post Bake Adjustments screen: per product Need (ordered for the
+// baking date, every account), Inventory, a Final Count typed in after the
+// bake, Have = Inventory + Final and Net = Have - Need; plus its reports.
+// Product types are compared case-insensitively, as Access did.
+
+const pbDate = d => d || new Date().toISOString().slice(0, 10)
+const typeIn = list => `UPPER(TRIM(p.prod_type)) IN (${list.map(t => `'${t.toUpperCase()}'`).join(',')})`
+
+app.get('/api/postbake', requireAuth, async (req, res) => {
+  const date = pbDate(req.query.date)
+  try {
+    const { rows } = await query(`
+      SELECT p.prod_name,
+             COALESCE(o.need, 0)  AS need,
+             COALESCE(i.units, 0) AS inventory,
+             COALESCE(f.final, 0) AS final
+      FROM products p
+      LEFT JOIN (SELECT prod_name, SUM(units) AS need FROM daily_orders WHERE ordr_dt = $1 GROUP BY prod_name) o
+             ON o.prod_name = p.prod_name
+      LEFT JOIN inventory i ON i.prod_name = p.prod_name
+      LEFT JOIN final_counts f ON f.prod_name = p.prod_name AND f.final_date = $1
+      WHERE p.active = true OR o.need IS NOT NULL`, [date])
+    res.json(rows.map(r => ({ prod_name: r.prod_name, need: +r.need, inventory: +r.inventory, final: +r.final })))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.put('/api/postbake/final', requireAuth, async (req, res) => {
+  const { date, prod_name, final } = req.body
+  try {
+    await query(`
+      INSERT INTO final_counts(final_date, prod_name, final, last_update) VALUES($1,$2,$3,NOW())
+      ON CONFLICT (final_date, prod_name) DO UPDATE SET final = EXCLUDED.final, last_update = NOW()`,
+      [pbDate(date), prod_name, Number(final) || 0])
+    res.json({ success: true })
+  } catch (e) { res.status(400).json({ error: e.message }) }
+})
+
+// Reset Inventory: every product's inventory back to its start-of-day figure.
+app.post('/api/postbake/reset-inventory', requireAuth, async (req, res) => {
+  try {
+    const { rowCount } = await query(`UPDATE inventory SET units = COALESCE(sod_inv, 0), lst_updt = NOW()`)
+    await logActivity(req, 'reset_inventory', `Post Bake: inventory reset to start-of-day for ${rowCount} products`)
+    res.json({ success: true, count: rowCount })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Freezer List: what to pull from the freezer — Need beyond the Final Count.
+// With deduct, takes that much off inventory (the old "Deduct From Inventory"
+// box); sequence puts the quick breads first, as its report did.
+app.post('/api/postbake/freezer', requireAuth, async (req, res) => {
+  const date = pbDate(req.body.date)
+  const deduct = !!req.body.deduct
+  try {
+    const { rows } = await query(`
+      SELECT p.prod_name AS product, p.prod_type,
+             o.need - COALESCE(f.final, 0) AS need,
+             CASE UPPER(TRIM(p.prod_type)) WHEN 'LARGE QUICK BREAD' THEN 1 WHEN 'SMALL QUICK BREAD' THEN 2 ELSE 3 END AS sequence
+      FROM (SELECT prod_name, SUM(units) AS need FROM daily_orders WHERE ordr_dt = $1 GROUP BY prod_name) o
+      JOIN products p ON p.prod_name = o.prod_name
+      LEFT JOIN final_counts f ON f.prod_name = o.prod_name AND f.final_date = $1
+      WHERE o.need > COALESCE(f.final, 0)
+      ORDER BY sequence, p.prod_type, p.prod_name`, [date])
+    if (deduct && rows.length) {
+      for (const r of rows) {
+        await query(`
+          INSERT INTO inventory(prod_name, units, sod_inv, lst_updt) VALUES($1, -$2::numeric, 0, NOW())
+          ON CONFLICT (prod_name) DO UPDATE SET units = inventory.units - $2::numeric, lst_updt = NOW()`,
+          [r.product, r.need])
+      }
+      await logActivity(req, 'freezer_deduct', `Post Bake ${date}: deducted freezer list (${rows.length} products) from inventory`)
+    }
+    res.json(rows.map(r => ({ ...r, need: +r.need })))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Postbake Report: every order for the date carrying a post-bake addition.
+app.get('/api/postbake/report', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await query(`
+      SELECT account, prod_name, postbake_adj, special_ords FROM daily_orders
+      WHERE ordr_dt = $1 AND postbake_adj > 0 ORDER BY account, prod_name`, [pbDate(req.query.date)])
+    res.json(rows.map(r => ({ ...r, postbake_adj: +r.postbake_adj, special_ords: +(r.special_ords || 0) })))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Final Count sheet: the products ordered that day to count after the bake —
+// breads and rolls first, then large quick breads and muffins (GF: the GF types).
+app.get('/api/postbake/final-sheet', requireAuth, async (req, res) => {
+  const gf = req.query.gf === '1' || req.query.gf === 'true'
+  const [first, second] = gf
+    ? [['GF BREAD', 'GF ROLL'], ['GF LARGE QUICK BREAD', 'GF LARGE QUICKBREAD', 'GF MUFFIN']]
+    : [['Bread', 'Round Bread', 'Roll'], ['Large Quick Bread', 'Muffin']]
+  try {
+    const { rows } = await query(`
+      SELECT DISTINCT p.prod_name, p.prod_type, CASE WHEN ${typeIn(first)} THEN 1 ELSE 2 END AS sequence
+      FROM daily_orders o JOIN products p ON p.prod_name = o.prod_name
+      WHERE o.ordr_dt = $1 AND (${typeIn(first)} OR ${typeIn(second)})
+      ORDER BY sequence, p.prod_type, p.prod_name`, [pbDate(req.query.date)])
+    res.json(rows)
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Pie List: pies and tarts, quiches, pockets, then cookie trays (individual
+// cookies 12 to a tray; bagged 4 cookies a bag, 35 cookies a tray, rounded up).
+// GF: every gluten-free product ordered, except GF rolls and GF cookies.
+app.get('/api/postbake/pielist', requireAuth, async (req, res) => {
+  const date = pbDate(req.query.date)
+  const gf = req.query.gf === '1' || req.query.gf === 'true'
+  const sumBy = where => query(`
+    SELECT p.prod_name, p.prod_type, SUM(o.units) AS count_num
+    FROM daily_orders o JOIN products p ON p.prod_name = o.prod_name
+    WHERE o.ordr_dt = $1 AND ${where}
+    GROUP BY p.prod_name, p.prod_type ORDER BY p.prod_name`, [date]).then(r => r.rows)
+  try {
+    const out = []
+    if (gf) {
+      for (const r of await sumBy(`p.gluten_free = true AND UPPER(TRIM(COALESCE(p.prod_type, ''))) NOT IN ('GF ROLL', 'GF COOKIE')`))
+        out.push({ ...r, sequence: 1 })
+    } else {
+      for (const r of await sumBy(typeIn(['10-PIE', 'Large Pie', 'Small Pie', 'Tart']))) out.push({ ...r, sequence: 1 })
+      for (const r of await sumBy(typeIn(['Quiche']))) out.push({ ...r, sequence: 2 })
+      for (const r of await sumBy(`UPPER(p.prod_name) LIKE 'POCKET%'`)) out.push({ ...r, sequence: 3 })
+      const cookies = [['CHOC CHIP', 'CHOC CHIP'], ['OATMEAL', 'OATMEAL'], ['REV CHOC CHIP', 'REVERSE CHOC CHIP'], ['P BUTTER', 'PEANUT BUTTER']]
+      let seq = 4
+      for (const [name, label] of cookies) {
+        const { rows } = await query(`
+          SELECT UPPER(TRIM(prod_name)) AS prod_name, SUM(units) AS u FROM daily_orders
+          WHERE ordr_dt = $1 AND UPPER(TRIM(prod_name)) IN ($2, $3) GROUP BY 1`, [date, `IND ${name}`, `BAG ${name}`])
+        if (rows.length) {
+          const ind = +(rows.find(r => r.prod_name === `IND ${name}`)?.u || 0)
+          const bag = +(rows.find(r => r.prod_name === `BAG ${name}`)?.u || 0)
+          const indTrays = Math.floor(ind / 12)
+          const rem = Math.round(ind - indTrays * 12)
+          const bagTrays = Math.ceil((bag * 4) / 35)
+          out.push({ prod_type: label, sequence: seq, prod_name: `LG - ${indTrays} trays + ${rem} cookies,  SM - ${bagTrays} trays.`, count_num: null })
+        }
+        seq++
+      }
+    }
+    res.json(out.map(r => ({ ...r, count_num: r.count_num == null ? null : +r.count_num })))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+// Wrap Report: muffins going to the accounts marked "wrap muffins".
+app.get('/api/postbake/wrap', requireAuth, async (req, res) => {
+  try {
+    const accts = await query(`SELECT name FROM accounts WHERE wrap_muffins = true ORDER BY name`)
+    const { rows } = await query(`
+      SELECT p.prod_name, SUM(o.units) AS units
+      FROM daily_orders o
+      JOIN products p ON p.prod_name = o.prod_name
+      JOIN accounts a ON TRIM(a.name) = TRIM(o.account)
+      WHERE o.ordr_dt = $1 AND UPPER(TRIM(p.prod_type)) = 'MUFFIN' AND a.wrap_muffins = true
+      GROUP BY p.prod_name HAVING SUM(o.units) > 0 ORDER BY p.prod_name`, [pbDate(req.query.date)])
+    res.json({ accounts: accts.rows.map(r => r.name), rows: rows.map(r => ({ prod_name: r.prod_name, units: +r.units })) })
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
 // ─── Special Orders ────────────────────────────────────────────────────────
 
 // A save can fail because the screen is holding a product name that has since
