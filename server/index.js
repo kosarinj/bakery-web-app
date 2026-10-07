@@ -8,7 +8,7 @@ import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pool, { query } from './db.js'
 import { openMDB, makeTableGetter, getTableInfo, IMPORTERS } from './mdb-import.js'
-import { ticketLayout, ticketHeader, writeTicketSheet, ticketTableHtml, TICKET_GRID_CSS } from './ticketLayout.js'
+import { ticketLayout, ticketHeader, writeTicketSheet, ticketTableHtml, TICKET_GRID_CSS, ticketMargins, PRINT_MARGIN_DEFAULTS } from './ticketLayout.js'
 
 const PgStore = connectPgSimple(session)
 const __dirname = dirname(fileURLToPath(import.meta.url))
@@ -1413,6 +1413,18 @@ app.post('/api/spec-orders', requireAuth, async (req, res) => {
   } catch (e) { res.status(400).json({ error: specOrderError(e) }) }
 })
 
+// Check All / Uncheck All on the Special Orders screen: the rows on screen.
+// "checked" only marks an order off; it doesn't touch daily_orders.
+app.post('/api/spec-orders/check', requireAuth, async (req, res) => {
+  const ids = (Array.isArray(req.body.ids) ? req.body.ids : []).map(Number).filter(Number.isInteger)
+  if (!ids.length) return res.json({ success: true, count: 0 })
+  try {
+    const { rowCount } = await query(
+      `UPDATE spec_orders SET checked = $1, last_update = NOW() WHERE id = ANY($2::int[])`, [!!req.body.checked, ids])
+    res.json({ success: true, count: rowCount })
+  } catch (e) { res.status(400).json({ error: specOrderError(e) }) }
+})
+
 app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
   const fields = ['account','cust_name','location','ordr_dt','del_date','prod_name','units','price','phone','notes','checked']
   const updates = ['last_update=NOW()'], vals = []
@@ -1907,7 +1919,7 @@ app.get('/api/billing/print/tickets', requireAuth, async (req, res) => {
     res.send(`<!doctype html><html><head><meta charset="utf-8">
 <title>Tickets ${fmtDate(del_date)}</title>
 <style>
-  @page { margin: 12mm; }
+  @page { margin: ${(m => `${m.top}in ${m.right}in ${m.bottom}in ${m.left}in`)(ticketMargins(settings, PRINT_MARGIN_DEFAULTS))}; }
   body { font-family: Arial, Helvetica, sans-serif; margin: 0; color: #000; }
   /* break-after on every ticket, cleared on :last-of-type — a toolbar div
      precedes the sections, so :last-child matched nothing and every run ended
@@ -2028,7 +2040,7 @@ app.get('/api/billing/export/tickets', requireAuth, async (req, res) => {
 
       // The office's two-column paper ticket — see ticketLayout.js, which the
       // printable page renders from too.
-      writeTicketSheet(ws, { header: ticketHeader(settings, bakeryName), account: acct.account, del_date, layout: ticketLayout(lines, ord) })
+      writeTicketSheet(ws, { header: ticketHeader(settings, bakeryName), account: acct.account, del_date, layout: ticketLayout(lines, ord), margins: ticketMargins(settings) })
     }
 
     const filename = `tickets_${del_date}${acctFilter ? '_' + acctFilter.replace(/\s+/g, '_') : ''}.xlsx`

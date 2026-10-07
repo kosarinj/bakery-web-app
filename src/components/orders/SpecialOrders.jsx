@@ -388,6 +388,21 @@ export default function SpecialOrders() {
     )
   }
 
+  // Check or uncheck every order on screen (respects the current filters).
+  async function setAllChecked(checked) {
+    const ids = sorted.filter(o => (o.checked !== false) !== checked).map(o => o.id)
+    if (!ids.length) return
+    try {
+      const r = await fetch('/api/spec-orders/check', {
+        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
+        body: JSON.stringify({ ids, checked })
+      })
+      if (!r.ok) throw new Error((await r.json().catch(() => ({}))).error || r.statusText)
+      const set = new Set(ids)
+      setOrders(prev => prev.map(o => set.has(o.id) ? { ...o, checked } : o))
+    } catch (e) { setError(e.message) }
+  }
+
   async function save(id, field, value) {
     try {
       await fetch(`/api/spec-orders/${id}`, {
@@ -755,6 +770,17 @@ export default function SpecialOrders() {
           {copying ? 'Copying…' : '⬇ Repeat Special Orders'}
         </button>
         {copyMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>}
+        <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '0 4px' }} />
+        <button className="btn btn-secondary btn-sm" onClick={() => setAllChecked(false)}
+          disabled={!sorted.some(o => o.checked !== false)}
+          title="Uncheck every order shown below">
+          ☐ Uncheck All
+        </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => setAllChecked(true)}
+          disabled={!sorted.some(o => o.checked === false)}
+          title="Check every order shown below">
+          ☑ Check All
+        </button>
       </div>
 
       {error && <div className="error-message">{error}</div>}

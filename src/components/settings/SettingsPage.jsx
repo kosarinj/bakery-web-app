@@ -132,6 +132,28 @@ export default function SettingsPage() {
           </div>
 
           <div>
+            <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Page Margins (inches)</label>
+            <div style={{ display: 'flex', gap: 12, flexWrap: 'wrap' }}>
+              {[['top', 'Top'], ['right', 'Right'], ['bottom', 'Bottom'], ['left', 'Left']].map(([side, label]) => {
+                const key = `ticket_margin_${side}`
+                return (
+                  <label key={key} style={{ fontSize: 13, display: 'flex', alignItems: 'center', gap: 6 }}>
+                    {label}
+                    <input type="number" className="form-control" style={{ width: 80 }} min="0" max="3" step="0.05"
+                      placeholder="default" defaultValue={settings[key] ?? ''} key={`${key}:${settings[key] ?? ''}`}
+                      onBlur={e => { const v = e.target.value.trim(); if (v !== (settings[key] ?? '')) saveSetting(key, v) }} />
+                    {saved === key && <span style={{ color: 'var(--primary)', fontWeight: 600 }}>✓ Saved</span>}
+                  </label>
+                )
+              })}
+            </div>
+            <div style={{ fontSize: 12, color: 'var(--text-muted)', marginTop: 4 }}>
+              For both Print Tickets and the Excel tickets. Leave a side blank for the usual margin.
+              If the printer's own dialog has a Margins option, set it to "Default" so these apply.
+            </div>
+          </div>
+
+          <div>
             <label style={{ display: 'block', fontSize: 12, fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.05em', color: 'var(--text-muted)', marginBottom: 6 }}>Group By</label>
             <select className="form-control" value={settings.ticket_group_by || 'prod_type'}
               onChange={e => saveSetting('ticket_group_by', e.target.value)}>

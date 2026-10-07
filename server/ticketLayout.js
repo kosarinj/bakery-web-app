@@ -123,13 +123,28 @@ export function ticketHeader(settings, name) {
 
 const HEADINGS = ['Units', 'Pack', 'Product', 'Cost', 'Retail', 'Total']
 
+// Page margins for tickets, in inches, from Settings → Delivery Tickets
+// (ticket_margin_top/right/bottom/left). A side left blank keeps that output's
+// own default, so nothing moves until someone sets one.
+export const TICKET_MARGIN_DEFAULTS = { top: 0.5, right: 0.25, bottom: 0.5, left: 0.5 }   // the Excel sheet's
+export const PRINT_MARGIN_DEFAULTS  = { top: 0.47, right: 0.47, bottom: 0.47, left: 0.47 } // the print page's 12mm
+export function ticketMargins(settings = {}, defaults = TICKET_MARGIN_DEFAULTS) {
+  const out = {}
+  for (const side of ['top', 'right', 'bottom', 'left']) {
+    const n = parseFloat(settings[`ticket_margin_${side}`])
+    out[side] = Number.isFinite(n) && n >= 0 && n <= 3 ? n : defaults[side]
+  }
+  return out
+}
+
 /** One account's ticket onto an ExcelJS worksheet. */
-export function writeTicketSheet(ws, { header, account, del_date, layout }) {
+export function writeTicketSheet(ws, { header, account, del_date, layout, margins = TICKET_MARGIN_DEFAULTS }) {
   // A–F left column, G a gutter, H–M right column.
   ;[5, 5, 22, 7, 7, 8, 2, 5, 5, 22, 7, 7, 8].forEach((w, i) => { ws.getColumn(i + 1).width = w })
   Object.assign(ws.pageSetup, {
     orientation: 'portrait', fitToPage: true, fitToWidth: 1, fitToHeight: 0,
-    margins: { left: 0.5, right: 0.25, top: 0.5, bottom: 0.5, header: 0.3, footer: 0.3 },
+    // Excel's header/footer bands sit inside the top/bottom margins.
+    margins: { ...margins, header: Math.min(0.3, margins.top / 2), footer: Math.min(0.3, margins.bottom / 2) },
     // Bakery name, date, account and column headings on every printed page.
     printTitlesRow: '1:5',
   })
