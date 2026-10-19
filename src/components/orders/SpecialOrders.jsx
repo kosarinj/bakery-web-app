@@ -318,6 +318,19 @@ export default function SpecialOrders() {
   }
   function setLine(i, field, value) { setBulkLines(ls => ls.map((l, idx) => idx === i ? { ...l, [field]: value } : l)) }
   function addLine() { setBulkLines(ls => [...ls, emptyLine()]) }
+  // Enter in a product line drops straight down to the same box on the next line
+  // (like a spreadsheet) instead of Tab's move to the right; on the last line it
+  // adds a fresh line first. The state update flushes at the end of this event,
+  // so by the time the timeout runs the new line is in the DOM.
+  function enterDown(e, i, col) {
+    if (e.key !== 'Enter') return
+    e.preventDefault()
+    if (i === bulkLines.length - 1) addLine()
+    setTimeout(() => {
+      const el = document.querySelector(`[data-bulk-cell="${i + 1}-${col}"]`)
+      if (el) { el.focus(); if (el.select) el.select() }
+    }, 0)
+  }
   function removeLine(i) { setBulkLines(ls => ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls) }
   const bulkReady = bulkLines.filter(l => l.prod_name && (parseFloat(l.units) || 0) > 0)
 
@@ -847,6 +860,7 @@ export default function SpecialOrders() {
                 <tr key={i}>
                   <td>
                     <select value={l.prod_name} onChange={e => setLine(i, 'prod_name', e.target.value)}
+                      data-bulk-cell={`${i}-prod`} onKeyDown={e => enterDown(e, i, 'prod')}
                       style={{ width: 200, maxWidth: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }}>
                       <option value="">— product —</option>
                       {productOptions(l.prod_name)}
@@ -854,15 +868,17 @@ export default function SpecialOrders() {
                   </td>
                   <td>
                     <input type="number" value={l.units} onChange={e => setLine(i, 'units', e.target.value)}
-                      onKeyDown={e => { if (e.key === 'Enter' && i === bulkLines.length - 1) addLine() }}
+                      data-bulk-cell={`${i}-units`} onKeyDown={e => enterDown(e, i, 'units')}
                       style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', textAlign: 'right', fontSize: 13 }} />
                   </td>
                   <td>
                     <input type="number" value={l.price} placeholder="0" onChange={e => setLine(i, 'price', e.target.value)}
+                      data-bulk-cell={`${i}-price`} onKeyDown={e => enterDown(e, i, 'price')}
                       style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', textAlign: 'right', fontSize: 13 }} />
                   </td>
                   <td>
                     <input type="text" value={l.notes} placeholder="Notes" onChange={e => setLine(i, 'notes', e.target.value)}
+                      data-bulk-cell={`${i}-notes`} onKeyDown={e => enterDown(e, i, 'notes')}
                       style={{ width: '100%', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px', fontSize: 13 }} />
                   </td>
                   <td style={{ textAlign: 'center' }}>

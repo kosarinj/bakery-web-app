@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 import { printReport, groupBy } from './postbakeReports'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
@@ -527,7 +527,16 @@ export default function OrdersGrid() {
     finally { setPbBusy('') }
   }
 
-  const rows    = flipped ? visibleProducts : displayAccounts
+  // Post Bake lists products down the side; sort them by Type, then Category
+  // (prod_group), then name, so a kind of product can be counted together. A
+  // heading row is drawn wherever the Type changes (see the tbody below).
+  const pbSortedProducts = (mode === 'postbake' && flipped)
+    ? [...visibleProducts].sort((a, b) =>
+        (a.prod_type || '~').localeCompare(b.prod_type || '~') ||
+        (a.prod_group || '~').localeCompare(b.prod_group || '~') ||
+        (a.prod_name || '').localeCompare(b.prod_name || '', undefined, { numeric: true, sensitivity: 'base' }))
+    : visibleProducts
+  const rows    = flipped ? pbSortedProducts : displayAccounts
   const cols    = flipped ? displayAccounts : visibleProducts
   const rowKey  = r => flipped ? r.prod_name : r.name
   const colKey  = c => flipped ? c.name : c.prod_name
@@ -951,14 +960,24 @@ export default function OrdersGrid() {
                   </td>
                 </tr>
               </>}
-              {rows.map(r => {
+              {rows.map((r, ri) => {
                 const rt = (flipped ? displayAccounts : visibleProducts).reduce((s, c) => {
                   const [acct, prod] = flipped ? [c.name, r.prod_name] : [r.name, c.prod_name]
                   return s + (entryAt(acct, prod)?.units || 0)
                 }, 0)
                 const rowIsGroup = !flipped && r.isGroup
+                const typeHead = pb && (ri === 0 || (rows[ri - 1].prod_type || '') !== (r.prod_type || ''))
                 return (
-                  <tr key={rowKey(r)}>
+                  <Fragment key={rowKey(r)}>
+                  {typeHead && (
+                    <tr>
+                      <td className="sticky-col" style={{ background: '#fef3c7', color: '#92400e', fontWeight: 700, fontSize: 12 }}>
+                        {r.prod_type || 'Other'}
+                      </td>
+                      <td colSpan={5 + cols.length + 1} style={{ background: '#fef3c7' }} />
+                    </tr>
+                  )}
+                  <tr>
                     <td className="sticky-col acct-name">
                       <div>
                         {rowLabel(r)}
@@ -1015,10 +1034,12 @@ export default function OrdersGrid() {
                       </>
                     })()}
                   </tr>
+                  </Fragment>
                 )
               })}
               <tr className="totals-row">
                 <td className="sticky-col">Total</td>
+                {pb && <td colSpan={5} />}
                 {cols.map(c => <td key={colKey(c)} className="total-cell">{colTotal(c) || ''}</td>)}
                 <td className="total-cell">{grandTotal || ''}</td>
                 {!flipped && <>
