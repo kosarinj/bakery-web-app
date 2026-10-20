@@ -346,24 +346,30 @@ export default function OrdersGrid() {
     (repeatAccounts !== null && repeatAccounts.size > 0 &&
       repeatAccounts.size < (Array.isArray(accounts) ? accounts.length : 0))
 
+  // Same idea for products: searching for a product (or picking a Type) means
+  // "show me these", so don't hide the ones with no orders yet. Otherwise a
+  // product nobody has ordered this date — a seasonal pumpkin pie or scone just
+  // switched on — can't be found, and so can't be given its first order.
+  const productFocused = !!filterProduct || !!filterProductType
+
   const visibleProducts = useMemo(() => {
     let p = Array.isArray(products) ? products : []
     if (extrasOnly) p = p.filter(x => x.is_extra)
     if (filterProductType) p = p.filter(x => x.prod_type === filterProductType)
     if (filterProduct) p = p.filter(x => (x.prod_name||'').toLowerCase().includes(filterProduct.toLowerCase()))
-    if (hideEmptyCols && !accountFocused && !extrasOnly) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
+    if (hideEmptyCols && !accountFocused && !productFocused && !extrasOnly) p = p.filter(x => accounts.some(a => (orderMap[`${a.name}|${x.prod_name}`]?.units || 0) > 0))
     return p
-  }, [products, extrasOnly, filterProductType, filterProduct, hideEmptyCols, accountFocused, accounts, orderMap])
+  }, [products, extrasOnly, filterProductType, filterProduct, hideEmptyCols, accountFocused, productFocused, accounts, orderMap])
 
   const visibleAccounts = useMemo(() => {
     let a = Array.isArray(accounts) ? accounts : []
     if (marketsOnly) a = a.filter(x => x.category === 'farmers_market')
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
     if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
-    if (hideEmptyRows && !accountFocused) a = a.filter(x => (extrasOnly ? products : visibleProducts).some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
+    if (hideEmptyRows && !accountFocused && !productFocused) a = a.filter(x => (extrasOnly ? products : visibleProducts).some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
     // Sort markets alphabetically by name (copy so we never mutate the accounts state)
     return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
-  }, [accounts, marketsOnly, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, visibleProducts, orderMap, extrasOnly, products])
+  }, [accounts, marketsOnly, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, productFocused, visibleProducts, orderMap, extrasOnly, products])
 
   // ── Market grouping: aggregate several stores (e.g. "Adams") into one order ──
   const [groupMarkets, setGroupMarkets] = useState(() => localStorage.getItem('orders_groupMarkets') === '1')
