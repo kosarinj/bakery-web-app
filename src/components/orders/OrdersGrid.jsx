@@ -102,6 +102,10 @@ export default function OrdersGrid() {
   const [filterProduct, setFilterProduct] = useState('')
   const [filterProductType, setFilterProductType] = useState('')
   const [filterAccount, setFilterAccount] = useState('')
+  // Quick pick: show exactly one account on the grid. Faster than ticking
+  // boxes in Filter Accounts, and only narrows the view — Repeat Orders still
+  // follows Filter Accounts.
+  const [oneAccount, setOneAccount] = useState('')
   const [showFilters, setShowFilters] = useState(false)
   const [extrasOnly, setExtrasOnly] = useState(false)
   const [marketsOnly, setMarketsOnly] = useState(false)  // accounts with category 'farmers_market'
@@ -342,7 +346,7 @@ export default function OrdersGrid() {
   // Filter Accounts box to fewer than all accounts. When focused we DON'T hide empty rows/
   // columns, so a brand-new / order-less account (e.g. "Rough Draft") shows up with every
   // product column — ready to type quantities into and create a new order.
-  const accountFocused = !!filterAccount ||
+  const accountFocused = !!filterAccount || !!oneAccount ||
     (repeatAccounts !== null && repeatAccounts.size > 0 &&
       repeatAccounts.size < (Array.isArray(accounts) ? accounts.length : 0))
 
@@ -366,10 +370,11 @@ export default function OrdersGrid() {
     if (marketsOnly) a = a.filter(x => x.category === 'farmers_market')
     if (filterAccount) a = a.filter(x => (x.name||'').toLowerCase().includes(filterAccount.toLowerCase()))
     if (repeatAccounts !== null) a = a.filter(x => repeatAccounts.has(x.name))
+    if (oneAccount) a = a.filter(x => x.name === oneAccount)
     if (hideEmptyRows && !accountFocused && !productFocused) a = a.filter(x => (extrasOnly ? products : visibleProducts).some(p => (orderMap[`${x.name}|${p.prod_name}`]?.units || 0) > 0))
     // Sort markets alphabetically by name (copy so we never mutate the accounts state)
     return [...a].sort((x, y) => (x.name || '').localeCompare(y.name || ''))
-  }, [accounts, marketsOnly, filterAccount, repeatAccounts, hideEmptyRows, accountFocused, productFocused, visibleProducts, orderMap, extrasOnly, products])
+  }, [accounts, marketsOnly, filterAccount, repeatAccounts, oneAccount, hideEmptyRows, accountFocused, productFocused, visibleProducts, orderMap, extrasOnly, products])
 
   // ── Market grouping: aggregate several stores (e.g. "Adams") into one order ──
   const [groupMarkets, setGroupMarkets] = useState(() => localStorage.getItem('orders_groupMarkets') === '1')
@@ -385,7 +390,8 @@ export default function OrdersGrid() {
 
   // Accounts as displayed: grouped members collapse into one pseudo-account per group.
   const displayAccounts = useMemo(() => {
-    if (!groupMarkets) return visibleAccounts
+    // A single picked account is shown as itself, editable, not folded into its group.
+    if (!groupMarkets || oneAccount) return visibleAccounts
     const out = [], seen = new Set()
     visibleAccounts.forEach(a => {
       const g = (a.order_group || '').trim()
@@ -394,7 +400,7 @@ export default function OrdersGrid() {
       } else out.push(a)
     })
     return out
-  }, [groupMarkets, visibleAccounts, groupMembers])
+  }, [groupMarkets, oneAccount, visibleAccounts, groupMembers])
 
   // orderMap accessor that sums a group's members (units + weighted-avg wprice).
   const entryAt = useCallback((acctName, prod) => {
@@ -782,6 +788,18 @@ export default function OrdersGrid() {
           title="Filter grid and repeat orders to selected accounts">
           👥 {repeatAccounts ? `${repeatAccounts.size} accounts` : 'Filter Accounts'}
         </button>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Show just one account on the grid">
+          Account:
+          <select value={oneAccount} onChange={e => setOneAccount(e.target.value)}
+            style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13,
+              fontWeight: oneAccount ? 700 : 400, background: oneAccount ? 'var(--primary-light)' : 'var(--surface)' }}>
+            <option value="">All accounts</option>
+            {[...accounts].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
+          </select>
+        </label>
+        {oneAccount && (
+          <button className="btn btn-secondary btn-sm" onClick={() => setOneAccount('')} title="Show all accounts again">✕</button>
+        )}
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '0 4px' }} />
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Delete every order for one account on this day">
           <select value={clearAccount} onChange={e => setClearAccount(e.target.value)}
