@@ -549,6 +549,16 @@ export default function OrdersGrid() {
         (a.prod_name || '').localeCompare(b.prod_name || '', undefined, { numeric: true, sensitivity: 'base' }))
     : visibleProducts
   const rows    = flipped ? pbSortedProducts : displayAccounts
+  // Post Bake: Enter saves the cell and drops to the same column on the next
+  // product row, like a spreadsheet, so a column of counts can be typed straight
+  // down. Read-only (grouped) cells are skipped. The timeout lets the saved cell
+  // finish closing before the next one opens.
+  const pbEnterDown = (ri, col) => () => setTimeout(() => {
+    for (let k = ri + 1; k < rows.length; k++) {
+      const el = document.querySelector(`[data-pb-cell="${CSS.escape(`${k}|${col}`)}"] .cell-editable`)
+      if (el) { el.focus(); return }
+    }
+  }, 0)
   const cols    = flipped ? displayAccounts : visibleProducts
   const rowKey  = r => flipped ? r.prod_name : r.name
   const colKey  = c => flipped ? c.name : c.prod_name
@@ -918,11 +928,11 @@ export default function OrdersGrid() {
                   {flipped ? 'Product' : 'Account'}
                 </th>
                 {pb && <>
-                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Have − Need">Net</th>
-                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Inventory + Final Count">Have</th>
-                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Ordered for this baking date, all accounts">Need</th>
-                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }}>Inventory</th>
-                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', fontSize: 12 }} title="Counted after the bake — type it in">Final Count</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', color: '#fff', fontSize: 12 }} title="Have − Need">Net</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', color: '#fff', fontSize: 12 }} title="Inventory + Final Count">Have</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', color: '#fff', fontSize: 12 }} title="Ordered for this baking date, all accounts">Need</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', color: '#fff', fontSize: 12 }}>Inventory</th>
+                  <th style={{ textAlign: 'right', minWidth: 52, background: '#92400e', color: '#fff', fontSize: 12 }} title="Counted after the bake — type it in">Final Count</th>
                 </>}
                 {cols.map(c => {
                   const isAcct = flipped  // in flipped mode cols are accounts
@@ -990,6 +1000,7 @@ export default function OrdersGrid() {
                   return s + (entryAt(acct, prod)?.units || 0)
                 }, 0)
                 const rowIsGroup = !flipped && r.isGroup
+                const pbOn = pb
                 const typeHead = pb && (ri === 0 || (rows[ri - 1].prod_type || '') !== (r.prod_type || ''))
                 return (
                   <Fragment key={rowKey(r)}>
@@ -1030,8 +1041,9 @@ export default function OrdersGrid() {
                         <td style={{ ...num, fontWeight: 700, background: short ? '#fef08a' : undefined, color: short ? '#dc2626' : undefined }}
                           title={short ? `Short ${d.need - d.have}` : undefined}>{d.need || ''}</td>
                         <td style={num}>{d.inventory || ''}</td>
-                        <td className="order-cell" style={{ background: '#fffbeb' }}>
-                          <EditableCell value={d.final} onSave={v => saveFinal(r.prod_name, v)} type="number" align="right" />
+                        <td className="order-cell" style={{ background: '#fffbeb' }} data-pb-cell={`${ri}|__final`}>
+                          <EditableCell value={d.final} onSave={v => saveFinal(r.prod_name, v)} type="number" align="right"
+                            onEnter={pbEnterDown(ri, '__final')} />
                         </td>
                       </>
                     })()}
@@ -1041,11 +1053,13 @@ export default function OrdersGrid() {
                       const pb = cellIsGroup ? 0 : cellPostbake(r, c)
                       return (
                         <td key={colKey(c)} className={`order-cell${val > 0 ? ' order-cell-filled' : ''}`}
+                          data-pb-cell={pbOn ? `${ri}|${colKey(c)}` : undefined}
                           style={pb ? { position: 'relative', boxShadow: 'inset 0 0 0 2px #f59e0b' } : undefined}
                           title={pb ? `Post bake ${pb > 0 ? '+' : ''}${pb} — Repeat Orders repeats ${Math.max(0, val - pb)}` : undefined}>
                           {cellIsGroup
                             ? <span style={{ display: 'block', textAlign: 'right', padding: '0 4px', fontWeight: 600, color: val > 0 ? 'var(--primary)' : 'var(--text-muted)' }}>{val || ''}</span>
-                            : <EditableCell value={val} onSave={onSave(r, c)} type="number" align="right" />}
+                            : <EditableCell value={val} onSave={onSave(r, c)} type="number" align="right"
+                                onEnter={pbOn ? pbEnterDown(ri, colKey(c)) : undefined} />}
                         </td>
                       )
                     })}

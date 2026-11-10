@@ -8,6 +8,9 @@ export default function EditableCell({
   className = '',
   disabled = false,
   placeholder = '',
+  // Called after Enter saves the cell — lets a grid move the cursor on (e.g.
+  // down to the next row). Without it, Enter just saves, as before.
+  onEnter,
 }) {
   const [editing, setEditing] = useState(false)
   const [draft, setDraft] = useState('')
@@ -50,7 +53,7 @@ export default function EditableCell({
   }
 
   function handleKeyDown(e) {
-    if (e.key === 'Enter') { e.preventDefault(); inputRef.current.blur() }
+    if (e.key === 'Enter') { e.preventDefault(); inputRef.current.blur(); onEnter?.() }
     if (e.key === 'Escape') cancel()
   }
 
