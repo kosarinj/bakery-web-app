@@ -2,6 +2,7 @@ import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'rea
 import EditableCell from '../shared/EditableCell'
 import { printReport, groupBy } from './postbakeReports'
 import MoveOrdersDialog from './MoveOrdersDialog'
+import ClearOrdersDialog from './ClearOrdersDialog'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
 import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
@@ -120,7 +121,8 @@ export default function OrdersGrid() {
   const [showRepeatAccounts, setShowRepeatAccounts] = useState(false)
   const [repeatAccounts, setRepeatAccounts] = useState(null) // null = all
   const [repeatPercents, setRepeatPercents] = useState({}) // account → percent of last week (default 100)
-  const [clearAccount, setClearAccount] = useState('')
+  // Clear Accounts popup: delete several accounts' orders for a date at once.
+  const [showClear, setShowClear] = useState(false)
   const [acctBoxSearch, setAcctBoxSearch] = useState('') // search within the Filter Accounts box
 
   // Mode, as the old program's two screens: "adjust" (Adjust Orders) changes
@@ -276,25 +278,6 @@ export default function OrdersGrid() {
     } catch (e) { setError(`Save failed: ${e.message}`) }
   }, [loadPostbake])
 
-  async function clearAccountOrders() {
-    if (!clearAccount || !date) return
-    if (!confirm(`Delete ALL orders for "${clearAccount}" on ${date}?\n\nThis removes every product line for that account on this day and cannot be undone.`)) return
-    try {
-      const r = await fetch('/api/orders/delete-account', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ ordr_dt: date, account: clearAccount })
-      })
-      const d = await r.json()
-      if (!r.ok) throw new Error(d.error)
-      // Drop that account's lines from the in-memory grid
-      const updated = { ...orderMapRef.current }
-      Object.keys(updated).forEach(k => { if (k.startsWith(`${clearAccount}|`)) delete updated[k] })
-      orderMapRef.current = updated; setOrderMap(updated)
-      setCopyMsg(`Deleted ${d.deleted} order${d.deleted !== 1 ? 's' : ''} for ${clearAccount}`)
-      setTimeout(() => setCopyMsg(''), 5000)
-      setClearAccount('')
-    } catch (e) { setError(`Clear failed: ${e.message}`) }
-  }
 
   async function saveDelDate(account, del_date) {
     setDelDateMap(prev => ({ ...prev, [account]: del_date }))
@@ -821,17 +804,14 @@ export default function OrdersGrid() {
           <button className="btn btn-secondary btn-sm" onClick={() => setOneAccount('')} title="Show all accounts again">✕</button>
         )}
         <span style={{ width: 1, alignSelf: 'stretch', background: 'var(--border)', margin: '0 4px' }} />
-        <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Delete every order for one account on this day">
-          <select value={clearAccount} onChange={e => setClearAccount(e.target.value)}
-            style={{ border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '4px 8px', fontSize: 13, background: 'var(--surface)' }}>
-            <option value="">— clear account… —</option>
-            {[...accounts].sort((a, b) => (a.name || '').localeCompare(b.name || '')).map(a => <option key={a.name} value={a.name}>{a.name}</option>)}
-          </select>
-        </label>
-        <button className="btn btn-danger btn-sm" onClick={clearAccountOrders} disabled={!clearAccount}
-          title="Delete all of the selected account's orders for this day">
-          🗑 Clear Account
+        <button className="btn btn-danger btn-sm" onClick={() => setShowClear(true)}
+          title="Pick accounts and delete all their orders for a day">
+          🗑 Clear Accounts
         </button>
+        {showClear && (
+          <ClearOrdersDialog initialDate={date} onClose={() => setShowClear(false)}
+            onCleared={msg => { setCopyMsg(msg); setTimeout(() => setCopyMsg(''), 8000); reloadOrders() }} />
+        )}
         {copyMsg && <span style={{ fontSize: 12, color: 'var(--primary)', fontWeight: 600 }}>{copyMsg}</span>}
       </div>
 

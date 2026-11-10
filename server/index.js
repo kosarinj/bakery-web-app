@@ -785,6 +785,47 @@ app.post('/api/orders/delete-account', requireAuth, async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }) }
 })
 
+// Clear several accounts' orders for one date at once (the popup version of
+// Clear Account). Same rows as the single-account clear — ordered that date —
+// but names are compared trimmed, like everywhere else on this screen.
+// Special orders are not touched.
+//
+// Every deleted row is copied into daily_orders_cleared first, in the same
+// transaction, with when and by whom: clearing a dozen accounts by mistake is
+// easy to do and otherwise impossible to undo.
+app.post('/api/orders/clear-accounts', requireAuth, async (req, res) => {
+  const { date, accounts } = req.body || {}
+  if (!date) return res.status(400).json({ error: 'date required' })
+  const names = (Array.isArray(accounts) ? accounts : []).map(a => String(a).trim()).filter(Boolean)
+  if (!names.length) return res.status(400).json({ error: 'Pick at least one account.' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(`CREATE TABLE IF NOT EXISTS daily_orders_cleared (LIKE daily_orders)`)
+    await client.query(`ALTER TABLE daily_orders_cleared
+      ADD COLUMN IF NOT EXISTS cleared_at TIMESTAMPTZ, ADD COLUMN IF NOT EXISTS cleared_by TEXT`)
+    const { rows } = await client.query(`
+      WITH del AS (
+        DELETE FROM daily_orders o
+        WHERE o.ordr_dt = $1::date AND TRIM(o.account) = ANY($2::text[])
+        RETURNING o.*
+      )
+      INSERT INTO daily_orders_cleared
+      SELECT del.*, NOW(), $3 FROM del
+      RETURNING TRIM(account) AS account`, [date, names, req.session?.user?.username || 'system'])
+    await client.query('COMMIT')
+    const counts = {}
+    for (const r of rows) counts[r.account] = (counts[r.account] || 0) + 1
+    const cleared = Object.keys(counts).sort()
+    await logActivity(req, 'delete_account_orders',
+      `Deleted ${rows.length} orders on ${date} for ${cleared.length} accounts: ${cleared.map(a => `${a} (${counts[a]})`).join(', ')} — saved in daily_orders_cleared`)
+    res.json({ deleted: rows.length, accounts: cleared })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(400).json({ error: e.message })
+  } finally { client.release() }
+})
+
 // Copy orders from one date to another (skips account+product pairs already entered on to_date)
 // Optional: accounts array limits which accounts are copied
 // Optional: percentages { accountName: percent } scales each account's units (default 100%)
