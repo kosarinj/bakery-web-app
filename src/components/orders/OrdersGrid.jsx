@@ -3,20 +3,9 @@ import EditableCell from '../shared/EditableCell'
 import { printReport, groupBy } from './postbakeReports'
 import MoveOrdersDialog from './MoveOrdersDialog'
 import ClearOrdersDialog from './ClearOrdersDialog'
+import RepeatOrdersDialog from './RepeatOrdersDialog'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
 import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
-
-function prevDay(dateStr) {
-  const d = new Date(dateStr + 'T00:00:00')
-  d.setDate(d.getDate() - 1)
-  return d.toISOString().slice(0, 10)
-}
-
-function addDays(dateStr, n) {
-  const d = new Date(dateStr + 'T00:00:00')
-  d.setDate(d.getDate() + n)
-  return d.toISOString().slice(0, 10)
-}
 
 function MiniCalendar({ value, activeDates, onChange, onMonthChange, onClose }) {
   const [month, setMonth] = useState(value ? value.slice(0, 7) : new Date().toISOString().slice(0, 7))
@@ -114,13 +103,11 @@ export default function OrdersGrid() {
   const [exportGroupBy, setExportGroupBy] = useState('')  // '' | 'subtype' | 'prod_type' | 'prod_group' — Excel export row grouping
 
   // Copy / Repeat
-  const [copyFrom, setCopyFrom] = useState('')
-  const [copyTo, setCopyTo] = useState('')
-  const [copying, setCopying] = useState(false)
+  // Repeat Orders popup (copies chosen accounts from the day on screen).
+  const [showRepeat, setShowRepeat] = useState(false)
   const [copyMsg, setCopyMsg] = useState('')
   const [showRepeatAccounts, setShowRepeatAccounts] = useState(false)
   const [repeatAccounts, setRepeatAccounts] = useState(null) // null = all
-  const [repeatPercents, setRepeatPercents] = useState({}) // account → percent of last week (default 100)
   // Clear Accounts popup: delete several accounts' orders for a date at once.
   const [showClear, setShowClear] = useState(false)
   const [acctBoxSearch, setAcctBoxSearch] = useState('') // search within the Filter Accounts box
@@ -151,13 +138,11 @@ export default function OrdersGrid() {
       .then(r => r.json())
       .then(s => {
         const d = effectiveBakingDate(s.baking_date)
-        const from = prevDay(d)
-        setDate(d); setCopyFrom(from); setCopyTo(addDays(from, 7)); setCalMonth(d.slice(0, 7))
+        setDate(d); setCalMonth(d.slice(0, 7))
       })
       .catch(() => {
         const d = todayStr()
-        const from = prevDay(d)
-        setDate(d); setCopyFrom(from); setCopyTo(addDays(from, 7)); setCalMonth(d.slice(0, 7))
+        setDate(d); setCalMonth(d.slice(0, 7))
       })
   }, [])
 
@@ -289,38 +274,6 @@ export default function OrdersGrid() {
     } catch (e) { setError(`Del date save failed: ${e.message}`) }
   }
 
-  async function copyOrders() {
-    if (!copyFrom || !copyTo) return
-    setCopying(true); setCopyMsg(''); setError('')
-    const accountsList = repeatAccounts ? [...repeatAccounts] : null
-    // Only send percentages that differ from the 100% default
-    const percentages = {}
-    Object.entries(repeatPercents).forEach(([acct, pct]) => {
-      const n = Number(pct)
-      if (Number.isFinite(n) && n >= 0 && n !== 100) percentages[acct] = n
-    })
-    const hasPercents = Object.keys(percentages).length > 0
-    try {
-      const r = await fetch('/api/orders/copy', {
-        method: 'POST', headers: { 'Content-Type': 'application/json' }, credentials: 'include',
-        body: JSON.stringify({ from_date: copyFrom, to_date: copyTo, ...(accountsList ? { accounts: accountsList } : {}), ...(hasPercents ? { percentages } : {}) })
-      })
-      const data = await r.json()
-      if (!r.ok) throw new Error(data.error)
-      // If copied to current date, merge into orderMap
-      if (copyTo === date) {
-        const updated = { ...orderMapRef.current }
-        ;(Array.isArray(data.rows) ? data.rows : []).forEach(o => {
-          updated[`${o.account}|${o.prod_name}`] = { id: o.id, units: parseFloat(o.units) || 0 }
-        })
-        orderMapRef.current = updated; setOrderMap(updated)
-      }
-      const acctNote = accountsList ? ` (${accountsList.length} accounts)` : ''
-      setCopyMsg(`Copied ${data.copied} order${data.copied !== 1 ? 's' : ''} from ${copyFrom} → ${copyTo}${acctNote}`)
-      setTimeout(() => setCopyMsg(''), 5000)
-    } catch (e) { setError(`Copy failed: ${e.message}`) }
-    finally { setCopying(false) }
-  }
 
   // Derived lists
   const productTypes = useMemo(() =>
@@ -648,7 +601,7 @@ export default function OrdersGrid() {
           </button>
           {calOpen && (
             <MiniCalendar value={date} activeDates={activeDates}
-              onChange={d => { setDate(d); const f = prevDay(d); setCopyFrom(f); setCopyTo(addDays(f, 7)) }}
+              onChange={d => { setDate(d) }}
               onMonthChange={m => setCalMonth(m)}
               onClose={() => setCalOpen(false)} />
           )}
@@ -762,17 +715,14 @@ export default function OrdersGrid() {
 
       {/* ── Copy / Repeat row ── */}
       <div className="page-toolbar" style={{ marginBottom: 12 }}>
-        <label>From:
-          <input type="date" value={copyFrom} onChange={e => { setCopyFrom(e.target.value); setCopyTo(addDays(e.target.value, 7)) }} />
-        </label>
-        <span style={{ color: 'var(--text-muted)', fontSize: 13 }}>→</span>
-        <label>To:
-          <input type="date" value={copyTo} onChange={e => setCopyTo(e.target.value)} />
-        </label>
-        <button className="btn btn-secondary btn-sm"
-          onClick={copyOrders} disabled={copying || !copyFrom || !copyTo || copyFrom === copyTo}>
-          {copying ? 'Copying…' : '⬇ Repeat Orders'}
+        <button className="btn btn-secondary btn-sm" onClick={() => setShowRepeat(true)}
+          title="Pick accounts and copy their orders from this day to another (a week later by default)">
+          ⬇ Repeat Orders
         </button>
+        {showRepeat && (
+          <RepeatOrdersDialog initialFrom={date} onClose={() => setShowRepeat(false)}
+            onRepeated={msg => { setCopyMsg(msg); setTimeout(() => setCopyMsg(''), 8000); reloadOrders() }} />
+        )}
         <button className="btn btn-secondary btn-sm" onClick={() => setShowMove(true)}
           title="Move chosen accounts' orders from one date to another">
           ⇄ Move Orders
@@ -788,7 +738,7 @@ export default function OrdersGrid() {
             }
             setShowRepeatAccounts(v => !v)
           }}
-          title="Filter grid and repeat orders to selected accounts">
+          title="Show only the selected accounts on the grid">
           👥 {repeatAccounts ? `${repeatAccounts.size} accounts` : 'Filter Accounts'}
         </button>
         <label style={{ display: 'flex', alignItems: 'center', gap: 4 }} title="Show just one account on the grid">
@@ -866,8 +816,6 @@ export default function OrdersGrid() {
               ✓ Accounts with Orders
             </button>
             <button className="btn btn-secondary btn-sm"
-              onClick={() => setRepeatPercents({})} title="Reset every account back to 100%">Reset %</button>
-            <button className="btn btn-secondary btn-sm"
               onClick={() => { setRepeatAccounts(null); setShowRepeatAccounts(false) }}>
               Clear filter
             </button>
@@ -875,9 +823,6 @@ export default function OrdersGrid() {
           <input type="text" placeholder="🔍 search accounts…" value={acctBoxSearch}
             onChange={e => setAcctBoxSearch(e.target.value)}
             style={{ width: '100%', boxSizing: 'border-box', border: '1px solid var(--border)', borderRadius: 'var(--radius-sm)', padding: '5px 8px', fontSize: 13, marginBottom: 8 }} />
-          <div style={{ fontSize: 11, color: 'var(--text-muted)', marginBottom: 8 }}>
-            Set each checked account's repeat amount as a % of last week (default 100%). e.g. Tucker Square 100, Abingdon 80.
-          </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: '4px 16px' }}>
             {[...accounts]
               .filter(a => !acctBoxSearch || (a.name || '').toLowerCase().includes(acctBoxSearch.toLowerCase()))
@@ -892,13 +837,6 @@ export default function OrdersGrid() {
                     setRepeatAccounts(next)
                   }} />
                 <span style={{ flex: 1 }}>{a.name}</span>
-                <input type="number" min="0" max="100" step="5"
-                  value={repeatPercents[a.name] ?? 100}
-                  onClick={e => e.stopPropagation()}
-                  onChange={e => setRepeatPercents(prev => ({ ...prev, [a.name]: e.target.value }))}
-                  title={`Repeat ${a.name} at this % of last week`}
-                  style={{ width: 50, padding: '1px 4px', fontSize: 12, textAlign: 'right' }} />
-                <span style={{ fontSize: 11, color: 'var(--text-muted)' }}>%</span>
               </label>
             ))}
           </div>

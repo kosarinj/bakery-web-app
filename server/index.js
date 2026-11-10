@@ -877,7 +877,9 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
       JOIN accounts a ON TRIM(a.name) = TRIM(f.account)
       LEFT JOIN (
         SELECT UNNEST($${accIdx}::text[]) AS account, UNNEST($${valIdx}::numeric[]) AS factor
-      ) p ON p.account = f.account
+      -- Trimmed: the popup sends trimmed names, and a padded account would
+      -- otherwise silently fall back to 100%.
+      ) p ON TRIM(p.account) = TRIM(f.account)
       WHERE f.ordr_dt = $1
         ${acctClause}
         AND ${scaledUnits} > 0
