@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 
 // Move Orders: pick a From and To date, tick the accounts, and their orders on
 // From are re-dated to To (e.g. six accounts' 11/24 delivery goes out 11/23).
+// Special orders stay put unless "Also move special orders" is ticked.
 // Accounts that already have orders on To can't be ticked — the server refuses
 // them too, since merging would print products twice. Moving back is the undo.
 export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
@@ -13,6 +14,8 @@ export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
   const [search, setSearch] = useState('')
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState('')
+  // Off unless the user asks — special orders normally stay on their date.
+  const [moveSpecial, setMoveSpecial] = useState(false)
 
   useEffect(() => {
     if (!from) { setRows([]); return }
@@ -22,19 +25,23 @@ export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
       .then(r => r.json().then(d => { if (!r.ok) throw new Error(d?.error || r.statusText); return d }))
       .then(d => {
         if (stale) return
-        const list = d.filter(r => r.from_rows > 0)
-        setRows(list)
+        setRows(d)
         // Keep ticks that still make sense for the new dates.
-        setPicked(prev => new Set([...prev].filter(a => list.some(r => r.account === a && !(to && r.to_rows > 0)))))
+        setPicked(prev => new Set([...prev].filter(a => d.some(r => r.account === a && !(to && r.to_rows > 0 && r.from_rows > 0)))))
       })
       .catch(e => { if (!stale) setError(String(e.message || e)) })
       .finally(() => { if (!stale) setLoading(false) })
     return () => { stale = true }
   }, [from, to])
 
-  const blocked = r => !!to && r.to_rows > 0
-  const shown = rows.filter(r => !search || r.account.toLowerCase().includes(search.toLowerCase()))
-  const pickedRows = rows.filter(r => picked.has(r.account))
+  // Only regular orders can collide; an account with none on From has nothing to clash.
+  const blocked = r => !!to && r.to_rows > 0 && r.from_rows > 0
+  // Accounts with regular orders on From — plus, when special orders are being
+  // moved too, accounts that only have special orders there.
+  const listed = rows.filter(r => r.from_rows > 0 || (moveSpecial && r.spec_rows > 0))
+  const shown = listed.filter(r => !search || r.account.toLowerCase().includes(search.toLowerCase()))
+  const pickedRows = listed.filter(r => picked.has(r.account))
+  const pickedSpec = pickedRows.reduce((s, r) => s + r.spec_rows, 0)
   const billedPicked = pickedRows.filter(r => r.billed)
   const fmt = d => { if (!d) return ''; const [y, m, dd] = d.split('-'); return `${+m}/${+dd}/${y}` }
 
@@ -47,16 +54,19 @@ export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
   async function move() {
     if (!from || !to || from === to || !pickedRows.length) return
     const units = pickedRows.reduce((s, r) => s + r.from_units, 0)
-    if (!window.confirm(`Move ${pickedRows.length} account${pickedRows.length !== 1 ? 's' : ''} (${units} units) from ${fmt(from)} to ${fmt(to)}?\n\n${pickedRows.map(r => r.account).join(', ')}`)) return
+    const specNote = moveSpecial
+      ? ` Also moving ${pickedSpec} special order${pickedSpec !== 1 ? 's' : ''}.`
+      : ' Special orders stay where they are.'
+    if (!window.confirm(`Move ${pickedRows.length} account${pickedRows.length !== 1 ? 's' : ''} (${units} units) from ${fmt(from)} to ${fmt(to)}?${specNote}\n\n${pickedRows.map(r => r.account).join(', ')}`)) return
     setBusy(true); setError('')
     try {
       const r = await fetch('/api/orders/move', {
         method: 'POST', credentials: 'include', headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ from_date: from, to_date: to, accounts: pickedRows.map(r => r.account) }),
+        body: JSON.stringify({ from_date: from, to_date: to, accounts: pickedRows.map(r => r.account), move_special: moveSpecial }),
       })
       const d = await r.json()
       if (!r.ok) throw new Error(d?.error || r.statusText)
-      onMoved?.(`Moved ${d.moved} order${d.moved !== 1 ? 's' : ''} for ${d.accounts.length} account${d.accounts.length !== 1 ? 's' : ''} from ${fmt(from)} → ${fmt(to)}`)
+      onMoved?.(`Moved ${d.moved} order${d.moved !== 1 ? 's' : ''}${moveSpecial ? ` + ${d.spec_moved} special` : ''} for ${d.accounts.length} account${d.accounts.length !== 1 ? 's' : ''} from ${fmt(from)} → ${fmt(to)}`)
       onClose()
     } catch (e) { setError(String(e.message || e)) }
     finally { setBusy(false) }
@@ -92,7 +102,7 @@ export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
 
         <div style={{ padding: '0 18px', overflowY: 'auto', flex: 1, minHeight: 120 }}>
           {loading && <div style={{ padding: 12, color: 'var(--text-muted)' }}>Loading…</div>}
-          {!loading && from && rows.length === 0 && <div style={{ padding: 12, color: 'var(--text-muted)' }}>No orders on {fmt(from)}.</div>}
+          {!loading && from && listed.length === 0 && <div style={{ padding: 12, color: 'var(--text-muted)' }}>No orders on {fmt(from)}.</div>}
           {!loading && shown.map(r => (
             <label key={r.account}
               style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '5px 2px', fontSize: 13, borderBottom: '1px solid var(--border-light, #f1f5f9)',
@@ -102,6 +112,9 @@ export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
               <span style={{ flex: 1, fontWeight: picked.has(r.account) ? 600 : 400 }}>{r.account}</span>
               {r.billed && <span style={{ fontSize: 11, color: '#b45309' }} title={`A bill was already generated for ${fmt(from)}`}>billed</span>}
               {blocked(r) && <span style={{ fontSize: 11, color: '#dc2626' }}>has orders on {fmt(to)}</span>}
+              {moveSpecial && r.spec_rows > 0 && (
+                <span style={{ fontSize: 11, color: '#7c3aed' }}>{r.spec_rows} special</span>
+              )}
               <span style={{ color: 'var(--text-muted)', fontSize: 12, minWidth: 70, textAlign: 'right' }}>{r.from_units} units</span>
             </label>
           ))}
@@ -113,8 +126,18 @@ export default function MoveOrdersDialog({ initialFrom, onClose, onMoved }) {
               Bills were already generated on {fmt(from)} for {billedPicked.map(r => r.account).join(', ')} — regenerate bills for both dates after moving.
             </div>
           )}
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 13, cursor: 'pointer', flexWrap: 'wrap' }}
+            title="Special orders stay on their date unless this is ticked">
+            <input type="checkbox" checked={moveSpecial} onChange={e => setMoveSpecial(e.target.checked)} />
+            Also move special orders
+            {moveSpecial && pickedRows.length > 0 && (
+              <span style={{ color: 'var(--text-muted)', fontSize: 12 }}>
+                ({pickedSpec} for the ticked accounts; delivery dates shift by the same number of days)
+              </span>
+            )}
+          </label>
           <div style={{ fontSize: 12, color: 'var(--text-muted)' }}>
-            Special orders aren't moved. To undo, move the same accounts back.
+            To undo, move the same accounts back.
           </div>
           {error && <div className="error-message" style={{ margin: 0 }}>{error}</div>}
           <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
