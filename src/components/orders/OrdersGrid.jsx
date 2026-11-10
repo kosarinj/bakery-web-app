@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef, useCallback, useMemo, Fragment } from 'react'
 import EditableCell from '../shared/EditableCell'
 import { printReport, groupBy } from './postbakeReports'
+import MoveOrdersDialog from './MoveOrdersDialog'
 import useLiveRefresh from '../../hooks/useLiveRefresh'
 import { effectiveBakingDate, todayStr } from '../../lib/bakingDate'
 
@@ -217,6 +218,7 @@ export default function OrdersGrid() {
       .catch(() => {})
   }, [date])
   useLiveRefresh('orders', reloadOrders)
+  const [showMove, setShowMove] = useState(false)
 
   const loadPostbake = useCallback(() => {
     if (!date || modeRef.current !== 'postbake') return
@@ -788,6 +790,14 @@ export default function OrdersGrid() {
           onClick={copyOrders} disabled={copying || !copyFrom || !copyTo || copyFrom === copyTo}>
           {copying ? 'Copying…' : '⬇ Repeat Orders'}
         </button>
+        <button className="btn btn-secondary btn-sm" onClick={() => setShowMove(true)}
+          title="Move chosen accounts' orders from one date to another">
+          ⇄ Move Orders
+        </button>
+        {showMove && (
+          <MoveOrdersDialog initialFrom={date} onClose={() => setShowMove(false)}
+            onMoved={msg => { setCopyMsg(msg); setTimeout(() => setCopyMsg(''), 8000); reloadOrders() }} />
+        )}
         <button className={`btn btn-sm ${showRepeatAccounts ? 'btn-primary' : 'btn-secondary'}`}
           onClick={() => {
             if (!showRepeatAccounts && repeatAccounts === null) {

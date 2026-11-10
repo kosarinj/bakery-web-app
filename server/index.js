@@ -858,6 +858,78 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
   }
 })
 
+// ─── Move Orders ──────────────────────────────────────────────────────────
+// Move chosen accounts' orders from one date to another (e.g. a holiday week:
+// six accounts' 11/24 delivery goes out on 11/23). The rows themselves are
+// re-dated, not copied, so nothing is duplicated and prices, special-order
+// counts and post-bake adjustments go with them. A row belongs to a date the
+// same way the Orders grid and tickets decide it: ordered then or delivering
+// then; each of the two dates is moved only where it matched.
+//
+// An account that already has orders on the target date is refused rather
+// than merged — merging would leave two rows of a product, which prints twice
+// on the ticket (see the 9/15 duplicate cleanup). Moving back is the undo.
+
+const MOVE_ON_DATE = (d) => `(o.ordr_dt = ${d}::date OR o.del_date = ${d}::date)`
+
+// Read-only: per account, what's on the from date and the to date, and whether
+// a bill was already generated for the from date (it would need regenerating).
+app.get('/api/orders/move-preview', requireAuth, async (req, res) => {
+  const { from, to } = req.query
+  if (!from) return res.status(400).json({ error: 'from required' })
+  try {
+    const { rows } = await query(`
+      SELECT TRIM(o.account) AS account,
+             COUNT(*) FILTER (WHERE ${MOVE_ON_DATE('$1')})::int AS from_rows,
+             COALESCE(SUM(o.units) FILTER (WHERE ${MOVE_ON_DATE('$1')}), 0) AS from_units,
+             COUNT(*) FILTER (WHERE $2::date IS NOT NULL AND ${MOVE_ON_DATE('$2')})::int AS to_rows,
+             EXISTS (SELECT 1 FROM track_tix t WHERE t.tix_date = $1::date AND TRIM(t.account) = TRIM(MIN(o.account))) AS billed
+      FROM daily_orders o
+      WHERE ${MOVE_ON_DATE('$1')} OR ($2::date IS NOT NULL AND ${MOVE_ON_DATE('$2')})
+      GROUP BY TRIM(o.account)
+      ORDER BY TRIM(o.account)`, [from, to || null])
+    res.json(rows.map(r => ({ ...r, from_units: +r.from_units })))
+  } catch (e) { res.status(500).json({ error: e.message }) }
+})
+
+app.post('/api/orders/move', requireAuth, async (req, res) => {
+  const { from_date, to_date, accounts } = req.body || {}
+  if (!from_date || !to_date) return res.status(400).json({ error: 'Pick a From and a To date.' })
+  if (from_date === to_date) return res.status(400).json({ error: 'From and To are the same date.' })
+  const names = (Array.isArray(accounts) ? accounts : []).map(a => String(a).trim()).filter(Boolean)
+  if (!names.length) return res.status(400).json({ error: 'Pick at least one account.' })
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    const { rows: clash } = await client.query(`
+      SELECT DISTINCT TRIM(o.account) AS account FROM daily_orders o
+      WHERE ${MOVE_ON_DATE('$1')} AND TRIM(o.account) = ANY($2::text[])
+      ORDER BY 1`, [to_date, names])
+    if (clash.length) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({
+        error: `Already have orders on ${to_date}: ${clash.map(r => r.account).join(', ')}. Nothing was moved.`,
+        conflicts: clash.map(r => r.account),
+      })
+    }
+    const { rows } = await client.query(`
+      UPDATE daily_orders o SET
+        ordr_dt  = CASE WHEN o.ordr_dt  = $1::date THEN $2::date ELSE o.ordr_dt  END,
+        del_date = CASE WHEN o.del_date = $1::date THEN $2::date ELSE o.del_date END,
+        last_update = NOW()
+      WHERE ${MOVE_ON_DATE('$1')} AND TRIM(o.account) = ANY($3::text[])
+      RETURNING TRIM(o.account) AS account`, [from_date, to_date, names])
+    await client.query('COMMIT')
+    const moved = [...new Set(rows.map(r => r.account))]
+    await logActivity(req, 'move_orders',
+      `Moved ${rows.length} orders from ${from_date} to ${to_date} for ${moved.length} accounts: ${moved.join(', ')}`)
+    res.json({ moved: rows.length, accounts: moved })
+  } catch (e) {
+    await client.query('ROLLBACK').catch(() => {})
+    res.status(400).json({ error: e.message })
+  } finally { client.release() }
+})
+
 // Orders summary: units per product for a given date (for bake list / have-need)
 app.get('/api/dashboard/revenue-history', requireAuth, async (req, res) => {
   const years = Math.min(Math.max(parseInt(req.query.years) || 5, 1), 30)
