@@ -7,6 +7,7 @@ import bcrypt from 'bcryptjs'
 import { dirname, join } from 'path'
 import { fileURLToPath } from 'url'
 import pool, { query } from './db.js'
+import { syncSpecialOrders, syncSpecialOrdersFrom, unsyncSpecialOrders } from './specSync.js'
 import { openMDB, makeTableGetter, getTableInfo, IMPORTERS } from './mdb-import.js'
 import { ticketLayout, ticketHeader, writeTicketSheet, ticketTableHtml, TICKET_GRID_CSS, ticketMargins, PRINT_MARGIN_DEFAULTS } from './ticketLayout.js'
 
@@ -78,6 +79,20 @@ function broadcast(channel) {
   const payload = `event: change\ndata: ${JSON.stringify({ channel, at: Date.now() })}\n\n`
   for (const res of sseClients) { try { res.write(payload) } catch { /* dropped */ } }
 }
+// Keep Special Order accounts' orders in step with their special orders (see
+// server/specSync.js). Never fails the request that triggered it: the special
+// order itself is saved; a sync problem is logged and the next change retries.
+async function syncSpec(req, pairs) {
+  try {
+    const r = await syncSpecialOrders(pool, pairs)
+    if (r.inserted || r.updated || r.deleted) broadcast('orders')
+    return r
+  } catch (e) {
+    console.error('special order sync failed:', e.message)
+    await logActivity(req, 'special_order_sync_error', e.message)
+  }
+}
+
 app.use('/api', (req, res, next) => {
   if (req.method !== 'GET' && req.method !== 'HEAD') {
     res.on('finish', () => {
@@ -327,15 +342,29 @@ app.patch('/api/accounts/:name', requireAuth, async (req, res) => {
     'route','sequence','category','acctgrp','balance','marketfee','prefix','postord','active','notes',
     'acct_id','subcategory','open_dt','manager','owner','address','city','state','phone','fax','email',
     'del_inst','entire_inv','wrap_muffins','print_inv','next_del','gas','tolls',
-    'region','day_of_week','webname','sendweb','webstart','webend','adj_level','order_group'
+    'region','day_of_week','webname','sendweb','webstart','webend','adj_level','order_group','is_special_order'
   ]
   const updates = []
   const vals = []
   fields.forEach(f => { if (req.body[f] !== undefined) { vals.push(req.body[f]); updates.push(`${f}=$${vals.length}`) } })
   if (!updates.length) return res.json({ success: true })
   vals.push(req.params.name)
-  await query(`UPDATE accounts SET ${updates.join(',')} WHERE name=$${vals.length}`, vals)
-  res.json({ success: true })
+  try {
+    const { rows: before } = await query('SELECT is_special_order FROM accounts WHERE name=$1', [req.params.name])
+    await query(`UPDATE accounts SET ${updates.join(',')} WHERE name=$${vals.length}`, vals)
+    // Marking / un-marking a Special Order account: add its special orders to
+    // its orders from today on, or take them back out.
+    const was = before[0]?.is_special_order === true
+    if (req.body.is_special_order !== undefined && !!req.body.is_special_order !== was) {
+      const r = req.body.is_special_order
+        ? await syncSpecialOrdersFrom(pool, { account: req.params.name })
+        : await unsyncSpecialOrders(pool, req.params.name)
+      broadcast('orders')
+      await logActivity(req, 'special_order_account',
+        `${req.params.name.trim()} ${req.body.is_special_order ? 'marked' : 'un-marked'} as a Special Order account: ${JSON.stringify(r)}`)
+    }
+    res.json({ success: true })
+  } catch (e) { res.status(400).json({ error: e.message }) }
 })
 
 // Bare stub accounts left behind by historical Access imports: no setup data of
@@ -994,6 +1023,9 @@ app.post('/api/orders/move', requireAuth, async (req, res) => {
     await client.query('COMMIT')
     // The middleware announces "orders"; open Special Orders screens need their own nudge.
     if (spec.length) broadcast('spec-orders')
+    // Special Order accounts: their orders follow their special orders, so
+    // re-total both dates (if the special orders stayed, so do those orders).
+    await syncSpec(req, names.flatMap(account => [{ account, date: from_date }, { account, date: to_date }]))
     const moved = [...new Set([...rows, ...spec].map(r => r.account))]
     await logActivity(req, 'move_orders',
       `Moved ${rows.length} orders${move_special ? ` and ${spec.length} special orders` : ''} from ${from_date} to ${to_date} for ${moved.length} accounts: ${moved.join(', ')}`)
@@ -1546,14 +1578,8 @@ app.post('/api/spec-orders', requireAuth, async (req, res) => {
       VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,NOW()) RETURNING *
     `, [account, cust_name || null, location, ordr_dt, del_date || null, prod_name, units || 0, price || 0, phone, notes])
 
-    // Sync special_ords onto the matching daily_orders row (same account+product+date)
-    if (account && prod_name && ordr_dt && (units || 0) > 0) {
-      await query(`
-        UPDATE daily_orders
-        SET special_ords = COALESCE(special_ords, 0) + $1, last_update = NOW()
-        WHERE account = $2 AND prod_name = $3 AND ordr_dt = $4::date
-      `, [units || 0, account, prod_name, ordr_dt])
-    }
+    // Special Order accounts only: add it to the account's orders.
+    await syncSpec(req, [{ account, date: ordr_dt }])
 
     res.json(rows[0])
   } catch (e) { res.status(400).json({ error: specOrderError(e) }) }
@@ -1581,22 +1607,14 @@ app.patch('/api/spec-orders/:id', requireAuth, async (req, res) => {
     const { rows: old } = await query('SELECT account, prod_name, ordr_dt, units FROM spec_orders WHERE id=$1', [req.params.id])
     await query(`UPDATE spec_orders SET ${updates.join(',')} WHERE id=$${vals.length}`, vals)
 
-    // Sync special_ords delta onto daily_orders
-    if (old.length && req.body.units !== undefined) {
-      const oldUnits = parseFloat(old[0].units) || 0
-      const newUnits = parseFloat(req.body.units) || 0
-      const delta = newUnits - oldUnits
+    // Special Order accounts: re-total where the order was and where it is now
+    // (account, product, date or units may all have changed).
+    if (old.length) {
       const row = old[0]
-      const acct    = req.body.account    || row.account
-      const prod    = req.body.prod_name  || row.prod_name
-      const ordrDt  = req.body.ordr_dt    || row.ordr_dt
-      if (delta !== 0 && acct && prod && ordrDt) {
-        await query(`
-          UPDATE daily_orders
-          SET special_ords = GREATEST(0, COALESCE(special_ords, 0) + $1), last_update = NOW()
-          WHERE account = $2 AND prod_name = $3 AND ordr_dt = $4::date
-        `, [delta, acct, prod, ordrDt])
-      }
+      await syncSpec(req, [
+        { account: row.account, date: row.ordr_dt },
+        { account: req.body.account || row.account, date: req.body.ordr_dt || row.ordr_dt },
+      ])
     }
     res.json({ success: true })
   } catch (e) { res.status(400).json({ error: specOrderError(e) }) }
@@ -1607,17 +1625,7 @@ app.delete('/api/spec-orders/:id', requireAuth, async (req, res) => {
     // Fetch before deleting so we can subtract from daily_orders
     const { rows: old } = await query('SELECT account, prod_name, ordr_dt, units FROM spec_orders WHERE id=$1', [req.params.id])
     await query('DELETE FROM spec_orders WHERE id=$1', [req.params.id])
-    if (old.length) {
-      const { account, prod_name, ordr_dt, units } = old[0]
-      const u = parseFloat(units) || 0
-      if (u > 0 && account && prod_name && ordr_dt) {
-        await query(`
-          UPDATE daily_orders
-          SET special_ords = GREATEST(0, COALESCE(special_ords, 0) - $1), last_update = NOW()
-          WHERE account = $2 AND prod_name = $3 AND ordr_dt = $4::date
-        `, [u, account, prod_name, ordr_dt])
-      }
-    }
+    if (old.length) await syncSpec(req, [{ account: old[0].account, date: old[0].ordr_dt }])
     res.json({ success: true })
   } catch (e) { res.status(400).json({ error: e.message }) }
 })
@@ -1747,6 +1755,7 @@ app.post('/api/spec-orders/copy', requireAuth, async (req, res) => {
       RETURNING *
     `, params)
     await logActivity(req, 'repeat_spec_orders', `Copied ${rows.length} special orders from ${from_date} to ${to_date}`)
+    await syncSpec(req, [...new Set(rows.map(r => r.account))].map(account => ({ account, date: to_date })))
     res.json({ copied: rows.length, rows })
   } catch (e) {
     await logActivity(req, 'repeat_spec_orders_error', `Error copying special orders from ${from_date} to ${to_date}: ${e.message}`)

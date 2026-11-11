@@ -280,6 +280,24 @@ async function initDB() {
   `)
   if (specFixed > 0) console.log(`Moved ${specFixed} legacy special orders onto their Location account`)
 
+  // Special Order accounts (see server/specSync.js). First run only: mark every
+  // account named "... S.O." and fill in their orders from today on. After
+  // that the checkbox on Accounts is the user's; it is never re-guessed.
+  const { rows: soCol } = await pool.query(
+    `SELECT 1 FROM information_schema.columns WHERE table_name='accounts' AND column_name='is_special_order' LIMIT 1`)
+  if (!soCol.length) {
+    await pool.query(`ALTER TABLE accounts ADD COLUMN IF NOT EXISTS is_special_order BOOLEAN DEFAULT false`)
+    const { rows: marked } = await pool.query(
+      `UPDATE accounts SET is_special_order = true WHERE name ~* '\\ms\\.o\\.?\\s*$' RETURNING name`)
+    const { syncSpecialOrdersFrom } = await import('./specSync.js')
+    const r = await syncSpecialOrdersFrom(pool)
+    const msg = `Marked ${marked.length} Special Order accounts; filled orders from today on: ` +
+      `${r.inserted} added, ${r.updated} updated, ${r.deleted} removed`
+    console.log(msg)
+    await pool.query(`INSERT INTO activity_log(username, action, details) VALUES('system','special_order_accounts',$1)`,
+      [`${msg}. Accounts: ${marked.map(m => m.name.trim()).join(', ')}`]).catch(() => {})
+  }
+
   console.log('Database ready')
 }
 

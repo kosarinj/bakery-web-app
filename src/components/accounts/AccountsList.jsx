@@ -196,6 +196,8 @@ export default function AccountsList() {
                   <th style={{ minWidth: 90 }}>Region</th>
                   <th style={{ minWidth: 100 }}>Day of Week</th>
                   <th style={{ minWidth: 70, textAlign: 'center' }}>Active</th>
+                  <th style={{ minWidth: 70, textAlign: 'center' }}
+                    title="Special Order account (e.g. Abingdon S.O.): its special orders are added to its regular orders, so they show on Orders, the bake counts and tickets">Spec Ord Acct</th>
                   <th style={{ minWidth: 200 }}>Notes</th>
                   <th style={{ width: 40 }}></th>
                 </tr>
@@ -229,6 +231,7 @@ export default function AccountsList() {
                       <button className="btn btn-primary btn-sm" style={{marginRight:6}} onClick={addAccount}>Add</button>
                       <button className="btn btn-secondary btn-sm" onClick={()=>{setAdding(false);setNewAcct(EMPTY_NEW)}}>Cancel</button>
                     </td>
+                    <td />
                     <td><input type="text" placeholder="Notes" value={newAcct.notes}
                       style={{width:'100%',border:'1px solid var(--border)',borderRadius:'var(--radius-sm)',padding:'4px 8px',fontSize:13,fontFamily:'var(--font)'}}
                       onChange={e=>setNewAcct(p=>({...p,notes:e.target.value}))}/></td>
@@ -263,6 +266,10 @@ export default function AccountsList() {
                         onClick={()=>save(a.name,'active',!a.active)}>
                         {a.active?'Active':'Inactive'}
                       </span>
+                    </td>
+                    <td style={{textAlign:'center'}}
+                      title={a.is_special_order ? "Special orders are added to this account's orders" : "Special orders are not added to this account's orders"}>
+                      <BoolCell value={a.is_special_order} onChange={v=>save(a.name,'is_special_order',v)}/>
                     </td>
                     <td><EditableCell value={a.notes||''} onSave={v=>save(a.name,'notes',v)} type="text" align="left"/></td>
                     <td style={{ textAlign: 'center' }}>
