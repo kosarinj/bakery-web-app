@@ -894,46 +894,78 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 
   try {
     const { rows } = await query(`
-      INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, del_date, last_update)
-      -- One row per account and product. Without DISTINCT ON, a source day that
-      -- already held duplicate rows was copied duplicates and all, so every
-      -- repeat carried them into the next week — Columbia's 9/16 order had 16
-      -- identical rows of each product, printed 16 times on the ticket. Where
-      -- the copies disagree, the Orders grid edited one of them, so the most
-      -- recently updated row is the one someone meant.
-      SELECT DISTINCT ON (TRIM(f.account), f.prod_name) f.prod_name, f.account,
-             ${scaledUnits} AS units,
-             f.wprice, f.rprice,
-             $2::date,
-             $2::date + COALESCE(a.postord::int, 0),
-             NOW()
-      FROM daily_orders f
-      -- TRIM on both sides, matching the tickets export. Without it an account
-      -- name carrying stray whitespace fails this INNER join and its rows are
-      -- dropped from the repeat silently — no error, just a lower count. That
-      -- is how 9/2 came out with market extras and no market orders.
-      JOIN accounts a ON TRIM(a.name) = TRIM(f.account)
-      LEFT JOIN (
-        SELECT UNNEST($${accIdx}::text[]) AS account, UNNEST($${valIdx}::numeric[]) AS factor
-      -- Trimmed: the popup sends trimmed names, and a padded account would
-      -- otherwise silently fall back to 100%.
-      ) p ON TRIM(p.account) = TRIM(f.account)
-      LEFT JOIN LATERAL (
-        SELECT SUM(COALESCE(s.units, 0)) AS u FROM spec_orders s
-        WHERE a.is_special_order IS TRUE
-          AND TRIM(s.account) = TRIM(f.account) AND s.ordr_dt = f.ordr_dt AND s.prod_name = f.prod_name
-      ) sx ON true
-      WHERE f.ordr_dt = $1
-        ${acctClause}
-        AND ${scaledUnits} > 0
-        AND NOT EXISTS (
+      WITH src AS (
+        -- One row per account and product. Without DISTINCT ON, a source day that
+        -- already held duplicate rows was copied duplicates and all, so every
+        -- repeat carried them into the next week — Columbia's 9/16 order had 16
+        -- identical rows of each product, printed 16 times on the ticket. Where
+        -- the copies disagree, the Orders grid edited one of them, so the most
+        -- recently updated row is the one someone meant.
+        SELECT DISTINCT ON (TRIM(f.account), f.prod_name) f.prod_name, f.account,
+               ${scaledUnits} AS units,
+               f.wprice, f.rprice,
+               $2::date + COALESCE(a.postord::int, 0) AS del_date,
+               (a.is_special_order IS TRUE) AS is_so
+        FROM daily_orders f
+        -- TRIM on both sides, matching the tickets export. Without it an account
+        -- name carrying stray whitespace fails this INNER join and its rows are
+        -- dropped from the repeat silently — no error, just a lower count. That
+        -- is how 9/2 came out with market extras and no market orders.
+        JOIN accounts a ON TRIM(a.name) = TRIM(f.account)
+        LEFT JOIN (
+          SELECT UNNEST($${accIdx}::text[]) AS account, UNNEST($${valIdx}::numeric[]) AS factor
+        -- Trimmed: the popup sends trimmed names, and a padded account would
+        -- otherwise silently fall back to 100%.
+        ) p ON TRIM(p.account) = TRIM(f.account)
+        LEFT JOIN LATERAL (
+          SELECT SUM(COALESCE(s.units, 0)) AS u FROM spec_orders s
+          WHERE a.is_special_order IS TRUE
+            AND TRIM(s.account) = TRIM(f.account) AND s.ordr_dt = f.ordr_dt AND s.prod_name = f.prod_name
+        ) sx ON true
+        WHERE f.ordr_dt = $1
+          ${acctClause}
+          AND ${scaledUnits} > 0
+        ORDER BY TRIM(f.account), f.prod_name, f.last_update DESC NULLS LAST, f.id DESC
+      ),
+      -- What's already on the new day per account and product: the row the
+      -- special-order sync keeps (lowest id, as specSync.js picks it) and how
+      -- much of the product is regular (not special, not post-bake) across
+      -- every row there.
+      tgt AS (
+        SELECT TRIM(e.account) AS acct, e.prod_name, MIN(e.id) AS id,
+               SUM(COALESCE(e.units, 0) - COALESCE(e.special_ords, 0) - COALESCE(e.postbake_adj, 0)) AS regular
+        FROM daily_orders e
+        WHERE e.ordr_dt = $2::date
+        GROUP BY 1, 2
+      ),
+      -- Special Order accounts: if Special Orders → Repeat ran first, the sync
+      -- already made a row holding only the special orders. Add the regular
+      -- part onto it instead of skipping the product, so the order the two
+      -- repeats run in doesn't matter. Only while that row has no regular part
+      -- yet, so running Repeat Orders twice still can't double it.
+      upd AS (
+        UPDATE daily_orders o
+           SET units = COALESCE(o.units, 0) + s.units, last_update = NOW()
+        FROM src s
+        JOIN tgt t ON t.acct = TRIM(s.account) AND t.prod_name = s.prod_name
+        WHERE o.id = t.id AND s.is_so AND t.regular <= 0
+        RETURNING o.*
+      ),
+      ins AS (
+        INSERT INTO daily_orders(prod_name, account, units, wprice, rprice, ordr_dt, del_date, last_update)
+        SELECT s.prod_name, s.account, s.units, s.wprice, s.rprice, $2::date, s.del_date, NOW()
+        FROM src s
+        WHERE NOT EXISTS (
           SELECT 1 FROM daily_orders e
-          WHERE e.prod_name = f.prod_name
-            AND e.account = f.account
+          WHERE e.prod_name = s.prod_name
+            AND e.account = s.account
             AND e.ordr_dt = $2::date
         )
-      ORDER BY TRIM(f.account), f.prod_name, f.last_update DESC NULLS LAST, f.id DESC
-      RETURNING *
+          -- Matched by trimmed name above; don't also insert beside it.
+          AND NOT (s.is_so AND EXISTS (SELECT 1 FROM tgt t WHERE t.acct = TRIM(s.account) AND t.prod_name = s.prod_name))
+        RETURNING *
+      )
+      SELECT * FROM ins UNION ALL SELECT * FROM upd
     `, params)
     const pctNote = pctAccounts.length ? ` (${pctAccounts.length} account % adjustments)` : ''
     await logActivity(req, 'repeat_orders', `Copied ${rows.length} orders from ${from_date} to ${to_date}${pctNote}`)
