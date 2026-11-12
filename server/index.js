@@ -880,7 +880,16 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
 
   // Base repeatable units (last week minus special/postbake), then scaled by the
   // account's percentage (default 100 when not listed) and rounded to whole units.
-  const baseUnits = `GREATEST(0, f.units - COALESCE(f.special_ords, 0) - COALESCE(f.postbake_adj, 0))`
+  // For Special Order accounts (accounts.is_special_order) the special part is
+  // also checked against spec_orders itself, not just the special_ords column:
+  // their special orders are repeated by Special Orders → Repeat, and the sync
+  // adds them onto the new day's rows, so copying them here too would double
+  // them. Whichever is larger wins, so a stale or overwritten special_ords
+  // (e.g. an Access order-history import writes 1/0 there) can't let them through.
+  const specPart = `CASE WHEN a.is_special_order IS TRUE
+                         THEN GREATEST(COALESCE(f.special_ords, 0), COALESCE(sx.u, 0))
+                         ELSE COALESCE(f.special_ords, 0) END`
+  const baseUnits = `GREATEST(0, f.units - ${specPart} - COALESCE(f.postbake_adj, 0))`
   const scaledUnits = `ROUND(${baseUnits} * COALESCE(p.factor, 100) / 100.0)`
 
   try {
@@ -909,6 +918,11 @@ app.post('/api/orders/copy', requireAuth, async (req, res) => {
       -- Trimmed: the popup sends trimmed names, and a padded account would
       -- otherwise silently fall back to 100%.
       ) p ON TRIM(p.account) = TRIM(f.account)
+      LEFT JOIN LATERAL (
+        SELECT SUM(COALESCE(s.units, 0)) AS u FROM spec_orders s
+        WHERE a.is_special_order IS TRUE
+          AND TRIM(s.account) = TRIM(f.account) AND s.ordr_dt = f.ordr_dt AND s.prod_name = f.prod_name
+      ) sx ON true
       WHERE f.ordr_dt = $1
         ${acctClause}
         AND ${scaledUnits} > 0
